@@ -1,13 +1,17 @@
-// Learn more https://docs.expo.io/guides/customizing-metro
 const { getDefaultConfig } = require('expo/metro-config');
 
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-// نضيف هذا الجزء لتوفير بديل لمكتبة 'stream'
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
   stream: require.resolve('stream-browserify'),
+  events: require.resolve('events'),
+  buffer: require.resolve('buffer'),
+  crypto: require.resolve('crypto-browserify'),
+  vm: require.resolve('vm-browserify'),
+  http: require.resolve('https-browserify'), // إضافة جديدة
+  https: require.resolve('https-browserify'), // إضافة جديدة
 };
 
 module.exports = config;
