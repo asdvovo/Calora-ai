@@ -49,6 +49,7 @@
     "react-native-tcp-socket": "^6.3.0",
     "react-native-vector-icons": "*",
     "stream-browserify": "^3.0.0",
+    "url": "^0.11.4",
     "vm-browserify": "^1.1.2"
   },
   "private": true

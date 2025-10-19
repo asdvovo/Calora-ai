@@ -12,8 +12,9 @@ config.resolver.extraNodeModules = {
   vm: require.resolve('vm-browserify'),
   http: require.resolve('https-browserify'),
   https: require.resolve('https-browserify'),
-  net: require.resolve('react-native-tcp-socket'), // إضافة جديدة
-  tls: require.resolve('react-native-tcp-socket'), // إضافة جديدة
+  net: require.resolve('react-native-tcp-socket'),
+  tls: require.resolve('react-native-tcp-socket'),
+  url: require.resolve('url'), // الإضافة الأخيرة
 };
 
 module.exports = config;
