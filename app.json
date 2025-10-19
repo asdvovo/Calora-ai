@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "happy-indigo-chocolates",
+    "name": "Calora AI",
     "slug": "snack-efd36423-a4b8-4ac4-bf12-3eca6f4ecfcb",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,7 +8,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -17,13 +17,19 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.sdsd2323.snackefd36423a4b84ac4bf123eca6f4ecfcb"
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6b2e1016-931d-40d3-9c99-75f3f65d1bf5"
+      }
     }
   }
 }

@@ -1,0 +1,52 @@
+# اسم سير العمل الذي سيظهر في تبويب Actions على GitHub
+name: Build Android APK
+
+# تحديد متى يتم تشغيل سير العمل
+on:
+  push:
+    branches:
+      - main # يتم التشغيل عند أي عملية دفع (push) لفرع main
+
+jobs:
+  build-android:
+    # تحديد نظام التشغيل الذي سيعمل عليه البناء (أحدث نسخة من أوبونتو)
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. جلب الكود من المستودع
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 2. إعداد بيئة جافا (JDK) اللازمة لبناء تطبيقات أندرويد
+      - name: Setup JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '11'
+
+      # 3. إعداد بيئة Node.js لتشغيل أوامر React Native
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18' # يمكنك تغيير إصدار Node.js حسب حاجة مشروعك
+
+      # 4. تثبيت الاعتماديات الخاصة بالمشروع (dependencies)
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile # أو استخدم npm install ci إذا كنت تستخدم npm
+
+      # 5. إعطاء صلاحية التنفيذ لملف gradlew
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
+        working-directory: ./android
+
+      # 6. بناء ملف APK نسخة Release
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
+        working-directory: ./android
+
+      # 7. رفع ملف الـ APK الناتج كقطعة أثرية (Artifact) لتتمكن من تحميله
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: app-release.apk
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk # المسار قد يختلف قليلاً
