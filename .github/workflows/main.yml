@@ -1,0 +1,39 @@
+# اسم الـ Workflow اللي هيظهر في صفحة Actions
+name: Build Android APK with EAS
+
+# امتى الـ Workflow ده يشتغل؟
+on:
+  push:
+    branches:
+      - main # هيشتغل لما تعمل push على برانش main
+
+jobs:
+  build:
+    # النظام اللي هيشتغل عليه الـ Action
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. بيعمل checkout للكود بتاعك من الـ repo
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. بيجهز بيئة Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18 # استخدم نسخة Node المناسبة لمشروعك
+
+      # 3. بيجهز بيئة Expo وبيعمل login باستخدام التوكن السري
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EAS_TOKEN }} # هيستخدم توكن سري هنضيفه كمان شوية
+
+      # 4. بيثبت الـ packages بتاعت المشروع
+      - name: Install dependencies
+        run: npm install # أو yarn install لو بتستخدم yarn
+
+      # 5. أمر بناء الـ APK باستخدام EAS
+      - name: Build APK
+        run: eas build --platform android --profile preview --non-interactive
