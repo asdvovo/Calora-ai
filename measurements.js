@@ -1,131 +1,66 @@
-// In measurements.js (شاشة القياسات المعدلة لتعمل على Expo Snack)
+// measurements.js (الكود الكامل والنهائي)
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-  StatusBar,
-} from 'react-native';
-// --- استخدام المكتبة البديلة المتوافقة مع Snack ---
-import Slider from '@miblanchard/react-native-slider'; 
+  View, Text, TouchableOpacity, StyleSheet, SafeAreaView, StatusBar,
+} from 'react-native'; 
+import Slider from '@react-native-community/slider'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 
-// ===================================================================
-// --- 1. الثيمات والترجمات ---
-// ===================================================================
-const lightTheme = {
-  primary: '#388E3C', textAndIcons: '#2E7D32', background: '#F9FBFA', white: '#FFFFFF',
-  cardBorder: '#EFF2F1', grayText: '#888888', disabled: '#A5D6A7', progressBarBg: '#E8F5E9',
-  bubbleBg: '#E8F5E9', sliderMaxTrack: '#D1E7D3', statusBar: 'dark-content',
-};
+const lightTheme = { primary: '#388E3C', textAndIcons: '#2E7D32', background: '#F9FBFA', white: '#FFFFFF', cardBorder: '#EFF2F1', grayText: '#888888', disabled: '#A5D6A7', progressBarBg: '#E8F5E9', bubbleBg: '#E8F5E9', sliderMaxTrack: '#D1E7D3', statusBar: 'dark-content' };
+const darkTheme = { primary: '#66BB6A', textAndIcons: '#AED581', background: '#121212', white: '#1E1E1E', cardBorder: '#272727', grayText: '#B0B0B0', disabled: '#4CAF50', progressBarBg: '#333333', bubbleBg: '#37474F', sliderMaxTrack: '#37474F', statusBar: 'light-content' };
+const translations = { en: { title: "What Are Your Measurements?", subtitle: "Don't worry, this information is private and helps us set your starting point.", heightLabel: "Height", heightUnit: "cm", weightLabel: "Current Weight", weightUnit: "kg", nextButton: "Next" }, ar: { title: "ما هي قياساتك الحالية؟", subtitle: "لا تقلق، هذه المعلومات خاصة بك وحدك وتساعدنا في تحديد نقطة البداية.", heightLabel: "الطول", heightUnit: "سم", weightLabel: "الوزن الحالي", weightUnit: "كجم", nextButton: "التالي" } };
 
-const darkTheme = {
-  primary: '#66BB6A', textAndIcons: '#AED581', background: '#121212', white: '#1E1E1E',
-  cardBorder: '#272727', grayText: '#B0B0B0', disabled: '#4CAF50', progressBarBg: '#333333',
-  bubbleBg: '#37474F', sliderMaxTrack: '#37474F', statusBar: 'light-content',
-};
-
-const translations = {
-  en: {
-    title: "What Are Your Measurements?",
-    subtitle: "Don't worry, this information is private and helps us set your starting point.",
-    heightLabel: "Height",
-    heightUnit: "cm",
-    weightLabel: "Current Weight",
-    weightUnit: "kg",
-    nextButton: "Next",
-  },
-  ar: {
-    title: "ما هي قياساتك الحالية؟",
-    subtitle: "لا تقلق، هذه المعلومات خاصة بك وحدك وتساعدنا في تحديد نقطة البداية.",
-    heightLabel: "الطول",
-    heightUnit: "سم",
-    weightLabel: "الوزن الحالي",
-    weightUnit: "كجم",
-    nextButton: "التالي",
-  },
-};
-
-// ===================================================================
-// --- 2. المكونات الاحترافية الديناميكية ---
-// ===================================================================
-const ProgressBar = ({ step, totalSteps, theme }) => (
-  <View style={styles.progressBarContainer(theme)}>
-    <View style={[styles.progressBar(theme), { width: `${(step / totalSteps) * 100}%` }]} />
-  </View>
-);
-
-const PrimaryButton = ({ title, onPress, disabled = false, theme }) => (
-  <TouchableOpacity
-    style={[styles.button(theme), disabled ? styles.buttonDisabled(theme) : styles.buttonEnabled(theme)]}
-    onPress={onPress} disabled={disabled} activeOpacity={0.7}>
-    <Text style={styles.buttonText(theme)}>{title}</Text>
-  </TouchableOpacity>
-);
-
-const ScreenHeader = ({ title, subtitle, theme }) => (
-  <View style={styles.headerContainer}>
-    <Text style={styles.title(theme)}>{title}</Text>
-    <Text style={styles.subtitle(theme)}>{subtitle}</Text>
-  </View>
-);
-
+const ProgressBar = ({ step, totalSteps, theme }) => ( <View style={styles.progressBarContainer(theme)}><View style={[styles.progressBar(theme), { width: `${(step / totalSteps) * 100}%` }]} /></View> );
+const PrimaryButton = ({ title, onPress, disabled = false, theme }) => ( <TouchableOpacity style={[styles.button(theme), disabled ? styles.buttonDisabled(theme) : styles.buttonEnabled(theme)]} onPress={onPress} disabled={disabled} activeOpacity={0.7}><Text style={styles.buttonText(theme)}>{title}</Text></TouchableOpacity> );
+const ScreenHeader = ({ title, subtitle, theme }) => ( <View style={styles.headerContainer}><Text style={styles.title(theme)}>{title}</Text><Text style={styles.subtitle(theme)}>{subtitle}</Text></View> );
 const MeasurementSlider = ({ label, unit, value, onValueChange, min, max, step, theme, isRTL }) => (
   <View style={styles.sliderComponentContainer}>
     <View style={styles.sliderLabelContainer(isRTL)}>
       <Text style={styles.label(theme, isRTL)}>{label}</Text>
       <View style={styles.valueBubble(theme, isRTL)}>
-        <Text style={styles.sliderValue(theme)}>{value.toFixed(label === translations[isRTL ? 'ar' : 'en'].weightLabel ? 1 : 0)}</Text>
+        <Text style={styles.sliderValue(theme)}>{value.toFixed(label.includes('الوزن') || label.toLowerCase().includes('weight') ? 1 : 0)}</Text>
         <Text style={styles.sliderUnit(theme, isRTL)}>{unit}</Text>
       </View>
     </View>
     <Slider
       style={styles.sliderStyle}
       minimumValue={min} maximumValue={max} step={step} value={value} 
-      onValueChange={(newValue) => onValueChange(newValue[0])} // المكتبة الجديدة ترجع القيمة داخل مصفوفة
+      onValueChange={onValueChange}
       minimumTrackTintColor={theme.primary} maximumTrackTintColor={theme.sliderMaxTrack} thumbTintColor={theme.primary}
     />
   </View>
 );
 
-// ===================================================================
-// --- 3. شاشة القياسات (MeasurementsScreen) ---
-// ===================================================================
-const MeasurementsScreen = ({ navigation, route }) => {
+// 🔧 --- التعديل هنا: استقبال appLanguage --- 🔧
+const MeasurementsScreen = ({ navigation, route, appLanguage }) => {
   const [height, setHeight] = useState(170);
   const [weight, setWeight] = useState(70.0);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [language, setLanguage] = useState('ar');
 
+  // ✅ نستخدم اللغة القادمة من App.js مباشرة
+  const language = appLanguage || 'en';
   const theme = isDarkMode ? darkTheme : lightTheme;
   const isRTL = language === 'ar';
   const t = (key) => translations[language]?.[key] || translations['en'][key];
 
-  useEffect(() => {
-    const loadSettings = async () => {
-      // In Snack, AsyncStorage might have limitations, but the code is correct
-      const darkMode = await AsyncStorage.getItem('isDarkMode');
-      setIsDarkMode(darkMode === 'true');
-      const lang = await AsyncStorage.getItem('appLanguage');
-      if (lang) setLanguage(lang);
-    };
-    loadSettings();
-  }, []);
+  // 🔧 --- التعديل هنا: هذا الـ Hook الآن فقط للـ Theme --- 🔧
+  useFocusEffect(
+    useCallback(() => {
+        const loadTheme = async () => {
+            try {
+                const darkMode = await AsyncStorage.getItem('isDarkMode');
+                setIsDarkMode(darkMode === 'true');
+            } catch (e) { console.error('Failed to load theme.', e); }
+        };
+        loadTheme();
+    }, [])
+  );
 
-  const handleNextPress = () => {
-    const collectedData = {
-      ...(route?.params || {}),
-      height: Math.round(height),
-      weight: parseFloat(weight.toFixed(1)),
-    };
-    // This will now work because navigation is provided by App.js
-    // For the demo, we'll just show an alert
-    alert(`Data to be sent to next screen: ${JSON.stringify(collectedData)}`);
-    // In a real app, you would use:
-    // navigation.navigate('Goal', collectedData); 
+  const handleNextPress = () => { 
+    const collectedData = { ...(route?.params || {}), height: Math.round(height), weight: parseFloat(weight.toFixed(1)) }; 
+    navigation.navigate('Goal', collectedData); 
   };
 
   return (
@@ -135,14 +70,8 @@ const MeasurementsScreen = ({ navigation, route }) => {
         <ProgressBar step={2} totalSteps={4} theme={theme} />
         <ScreenHeader title={t('title')} subtitle={t('subtitle')} theme={theme} />
         <View style={styles.formContainer}>
-          <MeasurementSlider
-            label={t('heightLabel')} unit={t('heightUnit')} value={height} onValueChange={setHeight}
-            min={120} max={220} step={1} theme={theme} isRTL={isRTL}
-          />
-          <MeasurementSlider
-            label={t('weightLabel')} unit={t('weightUnit')} value={weight} onValueChange={setWeight}
-            min={40} max={150} step={0.5} theme={theme} isRTL={isRTL}
-          />
+          <MeasurementSlider label={t('heightLabel')} unit={t('heightUnit')} value={height} onValueChange={setHeight} min={120} max={220} step={1} theme={theme} isRTL={isRTL} />
+          <MeasurementSlider label={t('weightLabel')} unit={t('weightUnit')} value={weight} onValueChange={setWeight} min={40} max={150} step={0.5} theme={theme} isRTL={isRTL} />
         </View>
         <View style={styles.footer}>
           <PrimaryButton title={t('nextButton')} onPress={handleNextPress} theme={theme} />
@@ -152,9 +81,6 @@ const MeasurementsScreen = ({ navigation, route }) => {
   );
 };
 
-// ===================================================================
-// --- 4. الأنماط الديناميكية ---
-// ===================================================================
 const styles = {
   safeArea: (theme) => ({ flex: 1, backgroundColor: theme.background }),
   container: { flex: 1, padding: 24, justifyContent: 'space-between' },

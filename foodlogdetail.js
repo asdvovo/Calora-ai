@@ -1,5 +1,3 @@
-// foodlogdetail.js
-
 import React, { useState, useCallback } from 'react';
 import { SafeAreaView, View, Text, StyleSheet, Image, ScrollView, StatusBar } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -68,15 +66,13 @@ const translations = {
 };
 
 // =========================================================================
-// --- المكونات المحدثة ---
+// --- المكونات ---
 // =========================================================================
 
-// مكون عرض عنصر الطعام (محدث)
 const FoodLogItem = ({ item, theme, t, isRTL, showMacros = true }) => {
     let imageSource = null;
     if (item.capturedImageUri) {
         imageSource = { uri: item.capturedImageUri };
-    // ✅ ===== هذا هو السطر الذي تم إصلاحه ===== ✅
     } else if (item.image && (item.image.startsWith('http') || item.image.startsWith('data:'))) {
         imageSource = { uri: item.image };
     } else if (item.image) {
@@ -95,7 +91,7 @@ const FoodLogItem = ({ item, theme, t, isRTL, showMacros = true }) => {
             <View style={styles.foodLogItemDetails}>
                 <View style={styles.foodLogItemHeader(isRTL)}>
                     <Text style={styles.foodLogItemName(theme, isRTL)} numberOfLines={2}>{item.name}</Text>
-                    <Text style={styles.foodLogItemCalories(theme, isRTL)}>{Math.round(item.calories)}{t('kcalUnit')}</Text>
+                    <Text style={styles.foodLogItemCalories(theme, isRTL)}>{Math.round(item.calories || 0)}{t('kcalUnit')}</Text>
                 </View>
                 {showMacros && (
                     <View style={styles.foodLogItemMacros(isRTL)}>
@@ -112,7 +108,6 @@ const FoodLogItem = ({ item, theme, t, isRTL, showMacros = true }) => {
     );
 };
 
-// شاشة تفاصيل سجل الطعام (محدثة بالكامل)
 const FoodLogDetailScreen = ({ route }) => {
     const { items, dateString } = route.params;
     const [theme, setTheme] = useState(lightTheme);
@@ -162,7 +157,7 @@ const FoodLogDetailScreen = ({ route }) => {
 };
 
 // =========================================================================
-// --- الأنماط الديناميكية ---
+// --- الأنماط ---
 // =========================================================================
 
 const styles = {

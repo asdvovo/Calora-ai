@@ -1,39 +1,79 @@
-# اسم الـ Workflow اللي هيظهر في صفحة Actions
-name: Build Android APK with EAS
+name: Fix Build Android Release
 
-# امتى الـ Workflow ده يشتغل؟
 on:
   push:
     branches:
-      - main # هيشتغل لما تعمل push على برانش main
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
-    # النظام اللي هيشتغل عليه الـ Action
     runs-on: ubuntu-latest
-
     steps:
-      # 1. بيعمل checkout للكود بتاعك من الـ repo
+      # 1. سحب الكود
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. بيجهز بيئة Node.js
-      - name: Setup Node.js
+      # 2. حذف مجلد android القديم (تنظيف كامل)
+      - name: Clean old Android folder
+        run: rm -rf android
+
+      # 3. تجهيز Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18 # استخدم نسخة Node المناسبة لمشروعك
+          node-version: 20.x
+          cache: 'npm'
 
-      # 3. بيجهز بيئة Expo وبيعمل login باستخدام التوكن السري
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
+      # 4. تجهيز Java 17
+      - name: Set up Java
+        id: setup-java
+        uses: actions/setup-java@v4
         with:
-          eas-version: latest
-          token: ${{ secrets.EAS_TOKEN }} # هيستخدم توكن سري هنضيفه كمان شوية
+          distribution: 'temurin'
+          java-version: '17'
 
-      # 4. بيثبت الـ packages بتاعت المشروع
+      # 5. تثبيت نظيف للمكتبات
       - name: Install dependencies
-        run: npm install # أو yarn install لو بتستخدم yarn
+        run: npm ci
 
-      # 5. أمر بناء الـ APK باستخدام EAS
-      - name: Build APK
-        run: eas build --platform android --profile preview --non-interactive
+      # 6. إنشاء ملفات الأندرويد
+      - name: Generate native Android files
+        run: npx expo prebuild --platform android --no-install --clean
+
+      # 7. إنشاء مفتاح توقيع مؤقت
+      - name: Generate Temporary Keystore
+        working-directory: ./android/app
+        run: |
+          keytool -genkey -v -keystore release.keystore \
+          -alias androidrelease \
+          -keyalg RSA -keysize 2048 -validity 10000 \
+          -storepass 123456 -keypass 123456 \
+          -dname "CN=Android,O=Android,C=US"
+
+      # 8. إعطاء صلاحية التنفيذ
+      - name: Make gradlew executable
+        working-directory: ./android
+        run: chmod +x ./gradlew
+
+      # 9. بناء التطبيق (تم تصحيح الخطأ هنا بدمج env)
+      - name: Build Android Release APK
+        working-directory: ./android
+        run: |
+          ./gradlew assembleRelease \
+            -Dorg.gradle.java.home=${{ steps.setup-java.outputs.path }} \
+            --no-daemon \
+            --stacktrace
+        env:
+          JAVA_HOME: ${{ steps.setup-java.outputs.path }}
+          MYAPP_UPLOAD_STORE_FILE: release.keystore
+          MYAPP_UPLOAD_KEY_ALIAS: androidrelease
+          MYAPP_UPLOAD_STORE_PASSWORD: 123456
+          MYAPP_UPLOAD_KEY_PASSWORD: 123456
+
+      # 10. رفع الـ APK
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: calora-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
