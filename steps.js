@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useLayoutEffect, useRef } from
 import { 
     StyleSheet, View, Text, ScrollView, SafeAreaView, TouchableOpacity, 
     ActivityIndicator, Alert, Modal, TextInput, StatusBar,
-    Platform, PermissionsAndroid, AppState, InteractionManager 
+    Platform, PermissionsAndroid, AppState, InteractionManager, DeviceEventEmitter 
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons'; 
@@ -11,10 +11,12 @@ import GoogleFit, { Scopes } from 'react-native-google-fit';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, useAnimatedProps } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+// --- الثوابت والإعدادات ---
 const STEP_LENGTH_KM = 0.000762;
 const CALORIES_PER_STEP = 0.04;
 const MAX_STEPS_GOAL = 100000;
 
+// الثيمات
 const lightTheme = { 
     primary: '#388E3C', primaryDark: '#1B5E20', background: '#E8F5E9',  
     card: '#FFFFFF',  textPrimary: '#212121',  textSecondary: '#757575', 
@@ -40,6 +42,7 @@ const translations = {
     }
 };
 
+// --- الرسم الآمن ---
 const describeArc = (x, y, radius, startAngle, endAngle) => { 
     'worklet';
     if (typeof x !== 'number' || typeof y !== 'number' || typeof radius !== 'number' || isNaN(endAngle)) { return "M 0 0"; }
@@ -53,6 +56,7 @@ const describeArc = (x, y, radius, startAngle, endAngle) => {
 };
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
+// --- المكون الدائري ---
 const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, theme }) => { 
     const RADIUS = size / 2; 
     const CENTER_RADIUS = RADIUS - strokeWidth / 2; 
@@ -71,7 +75,7 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
         const x = (size / 2) + CENTER_RADIUS * Math.cos(angleInRad);
         const y = (size / 2) + CENTER_RADIUS * Math.sin(angleInRad);
         return {
-            transform: [ { translateX: x - (DOT_SIZE / 2) + 0 }, { translateY: y - (DOT_SIZE / 2) } ],
+            transform: [ { translateX: x - (DOT_SIZE / 2) }, { translateY: y - (DOT_SIZE / 2) } ],
             opacity: 1 
         };
     });
@@ -100,7 +104,7 @@ const StepsScreen = () => {
     const [historicalData, setHistoricalData] = useState([]);
     const [rawStepsData, setRawStepsData] = useState({}); 
     const [loading, setLoading] = useState(true);
-    const [isGoogleFitConnected, setIsGoogleFitConnected] = useState(true); // افتراضي true عشان ميعملش فليكر
+    const [isGoogleFitConnected, setIsGoogleFitConnected] = useState(true); 
     const [isPromptVisible, setPromptVisible] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState('week');
     const [language, setLanguage] = useState('en');
@@ -150,10 +154,7 @@ const StepsScreen = () => {
         isFetchingRef.current = true;
 
         try {
-            // تحقق مبدئي من التخزين
             const storedConnected = await AsyncStorage.getItem('isGoogleFitConnected');
-            
-            // لو المستخدم مسجلش دخول قبل كدة، اخرج
             if (storedConnected !== 'true') {
                 setIsGoogleFitConnected(false);
                 isFetchingRef.current = false;
@@ -161,15 +162,11 @@ const StepsScreen = () => {
                 return;
             }
 
-            // لو مسجل، تأكد من الصلاحية
             const isAuth = await GoogleFit.checkIsAuthorized();
-            
-            // لو الصلاحية مش موجودة، حاول تعمل إعادة اتصال صامت
             if (!isAuth) {
                 try {
                     const authRes = await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] });
                     if (!authRes.success) {
-                        // لو فشل الاتصال الصامت، هنا بس نعتبره غير متصل
                         setIsGoogleFitConnected(false);
                         isFetchingRef.current = false;
                         setLoading(false);
@@ -183,14 +180,12 @@ const StepsScreen = () => {
                 }
             }
 
-            // وصلنا هنا يعني الاتصال تمام
             setIsGoogleFitConnected(true);
             
-            // تفعيل التسجيل في الخلفية لضمان التحديث
-            GoogleFit.startRecording((callback) => {
-                // callback للاطمئنان فقط
-            }, ['step']);
+            // 🔥 أهم سطر: بدء التسجيل للحصول على تحديثات لحظية 🔥
+            GoogleFit.startRecording((callback) => {}, ['step']);
 
+            // جلب البيانات الأولية
             const now = new Date();
             const startOfDay = new Date();
             startOfDay.setHours(0,0,0,0);
@@ -248,6 +243,50 @@ const StepsScreen = () => {
         }
     };
 
+    // 🔥🔥 Listener: التحديث اللحظي للخطوات 🔥🔥
+    useEffect(() => {
+        let observer = null;
+        if (isGoogleFitConnected) {
+            // الاشتراك في حدث الخطوات
+            observer = GoogleFit.observeSteps((res) => {
+                // التأكد إن البيانات صالحة
+                if (res && (res.steps > 0 || res.value > 0)) {
+                    // جوجل أحيانا بيرجع الزيادة وأحيانا الإجمالي، هنستخدم fetch للتأكد
+                    // بس عشان السرعة، لو القيمة معقولة هنعرضها
+                    // الأضمن هنا: نطلب تحديث سريع للخطوات
+                    const now = new Date();
+                    const startOfDay = new Date();
+                    startOfDay.setHours(0,0,0,0);
+                    
+                    // استعلام خفيف وسريع جداً
+                    GoogleFit.getDailyStepCountSamples({
+                        startDate: startOfDay.toISOString(),
+                        endDate: now.toISOString()
+                    }).then((todayRes) => {
+                        if (todayRes && todayRes.length > 0) {
+                            let maxSteps = 0;
+                            todayRes.forEach(source => {
+                                if (source.steps && source.steps.length > 0) {
+                                    if (source.steps[0].value > maxSteps) maxSteps = source.steps[0].value;
+                                }
+                            });
+                            // تحديث الرقم فوراً
+                            if (maxSteps > 0) setCurrentStepCount(maxSteps);
+                        }
+                    }).catch(e => console.log("Live update error", e));
+                }
+            });
+        }
+        
+        return () => {
+            // إلغاء الاشتراك عند الخروج عشان البطارية
+            if (observer) {
+                // مكتبة google-fit أحيانا مش بترجع دالة remove مباشرة، فبنستخدم ده للأمان
+                try { GoogleFit.unsubscribeListeners(); } catch(e){}
+            }
+        };
+    }, [isGoogleFitConnected]);
+
     useEffect(() => {
         try {
             if (selectedPeriod === 'week') {
@@ -299,8 +338,6 @@ const StepsScreen = () => {
     useFocusEffect(
         useCallback(() => {
             let isMounted = true;
-            let interval = null;
-
             const init = async () => {
                 const savedTheme = await AsyncStorage.getItem('isDarkMode');
                 if (isMounted) setTheme(savedTheme === 'true' ? darkTheme : lightTheme);
@@ -314,19 +351,8 @@ const StepsScreen = () => {
                 });
             };
             init();
-
-            // 🔥 تحديث دوري كل دقيقة عشان يجيب الخطوات الجديدة 🔥
-            interval = setInterval(() => {
-                if (isMounted && isGoogleFitConnected) {
-                    fetchGoogleFitData(false); // false يعني متجيبش الهيستوري كله، هات اليوم بس
-                }
-            }, 60000);
-
-            return () => { 
-                isMounted = false; 
-                if (interval) clearInterval(interval);
-            };
-        }, [isGoogleFitConnected]) 
+            return () => { isMounted = false; };
+        }, []) 
     );
     
     const distance = (currentStepCount * STEP_LENGTH_KM).toFixed(2);
