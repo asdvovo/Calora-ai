@@ -11,44 +11,24 @@ import GoogleFit, { Scopes } from 'react-native-google-fit';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, useAnimatedProps } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 
-// --- الثوابت والإعدادات ---
 const STEP_LENGTH_KM = 0.000762;
 const CALORIES_PER_STEP = 0.04;
 const MAX_STEPS_GOAL = 100000;
 
-// 🔥 تم إضافة indicatorDot للثيمات لتطابق الكود الآخر 🔥
 const lightTheme = { 
-    primary: '#388E3C', 
-    primaryDark: '#1B5E20', 
-    background: '#E8F5E9',  
-    card: '#FFFFFF',  
-    textPrimary: '#212121',  
-    textSecondary: '#757575', 
-    progressUnfilled: '#D6EAD7', 
-    inputBackground: '#F5F5F5',  
-    overlay: 'rgba(0,0,0,0.5)', 
-    accentOrange: '#FF7043', 
-    accentBlue: '#007BFF', 
-    white: '#FFFFFF', 
-    statusBar: 'dark-content',
-    indicatorDot: '#1B5E20' // لون النقطة (أخضر غامق)
+    primary: '#388E3C', primaryDark: '#1B5E20', background: '#E8F5E9',  
+    card: '#FFFFFF',  textPrimary: '#212121',  textSecondary: '#757575', 
+    progressUnfilled: '#D6EAD7', inputBackground: '#F5F5F5',  overlay: 'rgba(0,0,0,0.5)', 
+    accentOrange: '#FF7043', accentBlue: '#007BFF', white: '#FFFFFF', 
+    statusBar: 'dark-content', indicatorDot: '#1B5E20' 
 };
 
 const darkTheme = { 
-    primary: '#66BB6A', 
-    primaryDark: '#81C784', 
-    background: '#121212',  
-    card: '#1E1E1E',  
-    textPrimary: '#FFFFFF',  
-    textSecondary: '#B0B0B0', 
-    progressUnfilled: '#2C2C2C', 
-    inputBackground: '#2C2C2C',  
-    overlay: 'rgba(0,0,0,0.7)', 
-    accentOrange: '#FF8A65', 
-    accentBlue: '#42A5F5', 
-    white: '#FFFFFF', 
-    statusBar: 'light-content',
-    indicatorDot: '#A5D6A7' // لون النقطة (أخضر فاتح)
+    primary: '#66BB6A', primaryDark: '#81C784', background: '#121212',  
+    card: '#1E1E1E',  textPrimary: '#FFFFFF',  textSecondary: '#B0B0B0', 
+    progressUnfilled: '#2C2C2C', inputBackground: '#2C2C2C',  overlay: 'rgba(0,0,0,0.7)', 
+    accentOrange: '#FF8A65', accentBlue: '#42A5F5', white: '#FFFFFF', 
+    statusBar: 'light-content', indicatorDot: '#A5D6A7' 
 };
 
 const translations = { 
@@ -60,16 +40,12 @@ const translations = {
     }
 };
 
-// --- الرسم الآمن (Safe Worklet) ---
 const describeArc = (x, y, radius, startAngle, endAngle) => { 
     'worklet';
-    if (typeof x !== 'number' || typeof y !== 'number' || typeof radius !== 'number' || isNaN(endAngle)) {
-        return "M 0 0";
-    }
+    if (typeof x !== 'number' || typeof y !== 'number' || typeof radius !== 'number' || isNaN(endAngle)) { return "M 0 0"; }
     const clampedEndAngle = Math.min(endAngle, 359.999); 
     const startRad = (startAngle - 90) * Math.PI / 180.0;
     const endRad = (clampedEndAngle - 90) * Math.PI / 180.0;
-
     const start = { x: x + radius * Math.cos(startRad), y: y + radius * Math.sin(startRad) }; 
     const end = { x: x + radius * Math.cos(endRad), y: y + radius * Math.sin(endRad) }; 
     const largeArcFlag = clampedEndAngle - startAngle <= 180 ? '0' : '1'; 
@@ -77,40 +53,25 @@ const describeArc = (x, y, radius, startAngle, endAngle) => {
 };
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
-// --- المكون الدائري (المعدل) ---
 const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, theme }) => { 
     const RADIUS = size / 2; 
     const CENTER_RADIUS = RADIUS - strokeWidth / 2; 
-    
-    // حجم النقطة (معدل ليكون متناسق مع الكود الآخر)
     const DOT_SIZE = strokeWidth * 1.6; 
-    
     const safeProgress = (isNaN(progress) || !isFinite(progress) || progress < 0) ? 0 : Math.min(progress, 1);
     const animatedProgress = useSharedValue(0); 
     
-    useEffect(() => { 
-        animatedProgress.value = withTiming(safeProgress, { duration: 1000 }); 
-    }, [safeProgress]); 
-    
+    useEffect(() => { animatedProgress.value = withTiming(safeProgress, { duration: 1000 }); }, [safeProgress]); 
     const animatedPathProps = useAnimatedProps(() => { 
         const angle = animatedProgress.value * 360; 
         if (angle <= 0) return { d: 'M 0 0' }; 
         return { d: describeArc(size / 2, size / 2, CENTER_RADIUS, 0, angle) }; 
     }); 
-
-    // ستايل حركة النقطة
     const indicatorStyle = useAnimatedStyle(() => {
         const angleInRad = (animatedProgress.value * 360 - 90) * Math.PI / 180;
         const x = (size / 2) + CENTER_RADIUS * Math.cos(angleInRad);
         const y = (size / 2) + CENTER_RADIUS * Math.sin(angleInRad);
-        
         return {
-            transform: [
-                // لضبط النقطة في المنتصف تماماً نطرح نصف حجمها
-                // لو عاوز تحركها يمين زود رقم (+ 5)، لو يسار اطرح رقم (- 5)
-                { translateX: x - (DOT_SIZE / 2) + -156 }, 
-                { translateY: y - (DOT_SIZE / 2) }
-            ],
+            transform: [ { translateX: x - (DOT_SIZE / 2) + 0 }, { translateY: y - (DOT_SIZE / 2) } ],
             opacity: 1 
         };
     });
@@ -121,25 +82,7 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
                 <Circle cx={size / 2} cy={size / 2} r={CENTER_RADIUS} stroke={theme.progressUnfilled} strokeWidth={strokeWidth} fill="transparent" />
                 <AnimatedPath animatedProps={animatedPathProps} stroke={theme.primary} strokeWidth={strokeWidth} fill="transparent" strokeLinecap="round" />
             </Svg>
-            
-            {/* 🔥 النقطة المعدلة بالألوان الجديدة 🔥 */}
-            <Animated.View style={[
-                {
-                    position: 'absolute',
-                    top: 0, left: 0,
-                    width: DOT_SIZE, height: DOT_SIZE,
-                    borderRadius: DOT_SIZE / 2,
-                    
-                    backgroundColor: theme.indicatorDot, // اللون الجديد
-                    borderWidth: 3, // سمك الإطار 3 بيكسل
-                    borderColor: theme.card, // لون الإطار نفس لون الكارت
-                    
-                    elevation: 3,
-                    shadowColor: "#000", shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.2, shadowRadius: 2
-                },
-                indicatorStyle
-            ]} />
-
+            <Animated.View style={[{ position: 'absolute', top: 0, left: 0, width: DOT_SIZE, height: DOT_SIZE, borderRadius: DOT_SIZE / 2, backgroundColor: theme.indicatorDot, borderWidth: 3, borderColor: theme.card, elevation: 3, shadowColor: "#000", shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.2, shadowRadius: 2 }, indicatorStyle]} />
             <View style={styles.summaryTextContainer}>
                 <Text style={styles.progressCircleText(theme)}>{Math.round(Number(currentStepCount) || 0).toLocaleString('en-US')}</Text>
             </View>
@@ -147,7 +90,6 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
     ); 
 };
 
-// --- الشاشة الرئيسية ---
 const StepsScreen = () => {
     const navigation = useNavigation(); 
     const isFetchingRef = useRef(false);
@@ -155,12 +97,10 @@ const StepsScreen = () => {
     const [theme, setTheme] = useState(lightTheme);
     const [currentStepCount, setCurrentStepCount] = useState(0);
     const [stepsGoal, setStepsGoal] = useState(10000);
-    
     const [historicalData, setHistoricalData] = useState([]);
     const [rawStepsData, setRawStepsData] = useState({}); 
-
     const [loading, setLoading] = useState(true);
-    const [isGoogleFitConnected, setIsGoogleFitConnected] = useState(false);
+    const [isGoogleFitConnected, setIsGoogleFitConnected] = useState(true); // افتراضي true عشان ميعملش فليكر
     const [isPromptVisible, setPromptVisible] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState('week');
     const [language, setLanguage] = useState('en');
@@ -210,17 +150,46 @@ const StepsScreen = () => {
         isFetchingRef.current = true;
 
         try {
-            const isConnected = await AsyncStorage.getItem('isGoogleFitConnected') === 'true';
-            if (!isConnected && !isGoogleFitConnected) {
+            // تحقق مبدئي من التخزين
+            const storedConnected = await AsyncStorage.getItem('isGoogleFitConnected');
+            
+            // لو المستخدم مسجلش دخول قبل كدة، اخرج
+            if (storedConnected !== 'true') {
+                setIsGoogleFitConnected(false);
                 isFetchingRef.current = false;
                 setLoading(false);
                 return;
             }
 
+            // لو مسجل، تأكد من الصلاحية
             const isAuth = await GoogleFit.checkIsAuthorized();
-            if (!isAuth && isConnected) {
-                try { await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] }); } catch(e) {}
+            
+            // لو الصلاحية مش موجودة، حاول تعمل إعادة اتصال صامت
+            if (!isAuth) {
+                try {
+                    const authRes = await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] });
+                    if (!authRes.success) {
+                        // لو فشل الاتصال الصامت، هنا بس نعتبره غير متصل
+                        setIsGoogleFitConnected(false);
+                        isFetchingRef.current = false;
+                        setLoading(false);
+                        return;
+                    }
+                } catch(e) {
+                    setIsGoogleFitConnected(false);
+                    isFetchingRef.current = false;
+                    setLoading(false);
+                    return;
+                }
             }
+
+            // وصلنا هنا يعني الاتصال تمام
+            setIsGoogleFitConnected(true);
+            
+            // تفعيل التسجيل في الخلفية لضمان التحديث
+            GoogleFit.startRecording((callback) => {
+                // callback للاطمئنان فقط
+            }, ['step']);
 
             const now = new Date();
             const startOfDay = new Date();
@@ -279,42 +248,31 @@ const StepsScreen = () => {
         }
     };
 
-useEffect(() => {
+    useEffect(() => {
         try {
             if (selectedPeriod === 'week') {
                 const weekData = [];
-                
-                // 1. تحديد بداية الأسبوع الحالي (يوم الأحد)
                 const today = new Date();
-                const currentDayIndex = today.getDay(); // 0 = Sunday, 1 = Monday ...
+                const currentDayIndex = today.getDay(); 
                 const startOfWeek = new Date(today);
-                startOfWeek.setDate(today.getDate() - currentDayIndex); // ارجع للخلف حتى يوم الأحد
+                startOfWeek.setDate(today.getDate() - currentDayIndex); 
                 startOfWeek.setHours(0, 0, 0, 0);
 
-                // مصفوفة الأسماء الإنجليزي عشان نضمن الترتيب والسبيلينج الصح
                 const enDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                const arDays = ['الاحد', 'الاتنين', 'الثلاثاء', 'الاربعاء', 'الخميس', 'الجمعه', 'السبت'];
+                const arDays = ['أحد', 'اثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت'];
 
-                // 2. عمل لوب 7 أيام بداية من الأحد
                 for (let i = 0; i < 7; i++) {
                     const d = new Date(startOfWeek);
                     d.setDate(startOfWeek.getDate() + i);
                     
                     const offset = d.getTimezoneOffset() * 60000;
                     const dateKey = new Date(d.getTime() - offset).toISOString().split('T')[0];
-                    
-                    // اختيار الاسم بناءً على اللغة
                     let dayName = language === 'ar' ? arDays[d.getDay()] : enDays[d.getDay()];
 
-                    weekData.push({
-                        day: dayName,
-                        steps: rawStepsData[dateKey] || 0
-                    });
+                    weekData.push({ day: dayName, steps: rawStepsData[dateKey] || 0 });
                 }
                 setHistoricalData(weekData);
-
             } else {
-                // كود الشهر زي ما هو بدون تغيير
                 const formattedData = [];
                 for (let i = 29; i >= 0; i--) {
                     const d = new Date();
@@ -323,10 +281,8 @@ useEffect(() => {
                     const dateKey = new Date(d.getTime() - offset).toISOString().split('T')[0];
                     formattedData.push({ steps: rawStepsData[dateKey] || 0 });
                 }
-
                 const weeklyData = [];
                 const chunkSize = Math.ceil(formattedData.length / 4);
-                
                 for (let w = 0; w < 4; w++) {
                     let weekTotal = 0;
                     for (let d = 0; d < chunkSize; d++) {
@@ -337,14 +293,14 @@ useEffect(() => {
                 }
                 setHistoricalData(weeklyData);
             }
-        } catch (err) {
-            console.log("Chart Processing Error:", err);
-        }
+        } catch (err) { console.log("Chart Processing Error:", err); }
     }, [selectedPeriod, rawStepsData, language]);
 
     useFocusEffect(
         useCallback(() => {
             let isMounted = true;
+            let interval = null;
+
             const init = async () => {
                 const savedTheme = await AsyncStorage.getItem('isDarkMode');
                 if (isMounted) setTheme(savedTheme === 'true' ? darkTheme : lightTheme);
@@ -358,8 +314,19 @@ useEffect(() => {
                 });
             };
             init();
-            return () => { isMounted = false; };
-        }, []) 
+
+            // 🔥 تحديث دوري كل دقيقة عشان يجيب الخطوات الجديدة 🔥
+            interval = setInterval(() => {
+                if (isMounted && isGoogleFitConnected) {
+                    fetchGoogleFitData(false); // false يعني متجيبش الهيستوري كله، هات اليوم بس
+                }
+            }, 60000);
+
+            return () => { 
+                isMounted = false; 
+                if (interval) clearInterval(interval);
+            };
+        }, [isGoogleFitConnected]) 
     );
     
     const distance = (currentStepCount * STEP_LENGTH_KM).toFixed(2);
@@ -494,7 +461,6 @@ useEffect(() => {
     );
 };
 
-// --- الستايل ---
 const styles = {
     modalPage: (theme) => ({ flex: 1, backgroundColor: theme.background }),
     modalPageContent: { padding: 20 },
