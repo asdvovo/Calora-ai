@@ -7,7 +7,8 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import GoogleFit, { Scopes } from 'react-native-google-fit'; // ✅ رجعنا المكتبة
+import GoogleFit, { Scopes } from 'react-native-google-fit'; 
+import { Pedometer } from 'expo-sensors'; // ✅ دي الإضافة السحرية للعد اللحظي
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, useAnimatedProps } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 
@@ -32,12 +33,8 @@ const darkTheme = {
 };
 
 const translations = { 
-    ar: {
-        screenTitle: 'تقرير الخطوات', todaySteps: 'خطوات اليوم', kmUnit: ' كم', calUnit: ' سعرة', last7Days: 'آخر 7 أيام', last30Days: 'آخر 30 يوم', periodSummary: 'ملخص {period}', week: 'الأسبوع', month: 'الشهر', noData: 'لا توجد بيانات لعرضها.', periodStats: 'إحصائيات {period}', avgSteps: 'متوسط الخطوات اليومي:', totalSteps: 'إجمالي خطوات {period}:', bestDay: 'أفضل يوم في {period}:', changeGoalTitle: 'تغيير الهدف اليومي', changeGoalMsg: 'أدخل هدفك الجديد للخطوات:', goalPlaceholder: 'مثال: 8000', cancel: 'إلغاء', save: 'حفظ', goalTooLargeTitle: 'الهدف كبير جدًا', goalTooLargeMsg: 'الرجاء إدخال رقم أقل من {maxSteps}.', errorTitle: 'خطأ', invalidNumber: 'الرجاء إدخال رقم صحيح.', notAvailableTitle: 'Google Fit غير متصل', notAvailableMsg: 'يرجى ربط حساب Google Fit لعرض الخطوات.', connectBtn: 'ربط Google Fit', permissionDeniedTitle: 'صلاحية مرفوضة', permissionDeniedMsg: 'يرجى منح صلاحية النشاط البدني.', bestDayLabel: 'الأفضل:'
-    },
-    en: {
-        screenTitle: 'Steps Report', todaySteps: 'Today\'s Steps', kmUnit: ' km', calUnit: ' kcal', last7Days: 'Last 7 Days', last30Days: 'Last 30 Days', periodSummary: '{period} Summary', week: 'Week', month: 'Month', noData: 'No data to display.', periodStats: '{period} Statistics', avgSteps: 'Daily Average:', totalSteps: 'Total {period} Steps:', bestDay: 'Best day in {period}:', changeGoalTitle: 'Change Daily Goal', changeGoalMsg: 'Enter your new steps goal:', goalPlaceholder: 'Ex: 8000', cancel: 'Cancel', save: 'Save', goalTooLargeTitle: 'Goal Too Large', goalTooLargeMsg: 'Please enter a number less than {maxSteps}.', errorTitle: 'Error', invalidNumber: 'Please enter a valid number.', notAvailableTitle: 'Google Fit Disconnected', notAvailableMsg: 'Please connect Google Fit to view steps.', connectBtn: 'Connect Google Fit', permissionDeniedTitle: 'Permission Denied', permissionDeniedMsg: 'Please grant physical activity permission.', bestDayLabel: 'Best:'
-    }
+    ar: { screenTitle: 'تقرير الخطوات', todaySteps: 'خطوات اليوم', kmUnit: ' كم', calUnit: ' سعرة', last7Days: 'آخر 7 أيام', last30Days: 'آخر 30 يوم', periodSummary: 'ملخص {period}', week: 'الأسبوع', month: 'الشهر', noData: 'لا توجد بيانات لعرضها.', periodStats: 'إحصائيات {period}', avgSteps: 'متوسط الخطوات اليومي:', totalSteps: 'إجمالي خطوات {period}:', bestDay: 'أفضل يوم في {period}:', changeGoalTitle: 'تغيير الهدف اليومي', changeGoalMsg: 'أدخل هدفك الجديد للخطوات:', goalPlaceholder: 'مثال: 8000', cancel: 'إلغاء', save: 'حفظ', goalTooLargeTitle: 'الهدف كبير جدًا', goalTooLargeMsg: 'الرجاء إدخال رقم أقل من {maxSteps}.', errorTitle: 'خطأ', invalidNumber: 'الرجاء إدخال رقم صحيح.', notAvailableTitle: 'Google Fit غير متصل', notAvailableMsg: 'يرجى ربط حساب Google Fit لعرض الخطوات.', connectBtn: 'ربط Google Fit', permissionDeniedTitle: 'صلاحية مرفوضة', permissionDeniedMsg: 'يرجى منح صلاحية النشاط البدني.', bestDayLabel: 'الأفضل:' },
+    en: { screenTitle: 'Steps Report', todaySteps: 'Today\'s Steps', kmUnit: ' km', calUnit: ' kcal', last7Days: 'Last 7 Days', last30Days: 'Last 30 Days', periodSummary: '{period} Summary', week: 'Week', month: 'Month', noData: 'No data to display.', periodStats: '{period} Statistics', avgSteps: 'Daily Average:', totalSteps: 'Total {period} Steps:', bestDay: 'Best day in {period}:', changeGoalTitle: 'Change Daily Goal', changeGoalMsg: 'Enter your new steps goal:', goalPlaceholder: 'Ex: 8000', cancel: 'Cancel', save: 'Save', goalTooLargeTitle: 'Goal Too Large', goalTooLargeMsg: 'Please enter a number less than {maxSteps}.', errorTitle: 'Error', invalidNumber: 'Please enter a valid number.', notAvailableTitle: 'Google Fit Disconnected', notAvailableMsg: 'Please connect Google Fit to view steps.', connectBtn: 'Connect Google Fit', permissionDeniedTitle: 'Permission Denied', permissionDeniedMsg: 'Please grant physical activity permission.', bestDayLabel: 'Best:' }
 };
 
 // --- الرسم ---
@@ -62,7 +59,7 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
     const safeProgress = (isNaN(progress) || !isFinite(progress) || progress < 0) ? 0 : Math.min(progress, 1);
     const animatedProgress = useSharedValue(0); 
     
-    useEffect(() => { animatedProgress.value = withTiming(safeProgress, { duration: 1000 }); }, [safeProgress]); 
+    useEffect(() => { animatedProgress.value = withTiming(safeProgress, { duration: 500 }); }, [safeProgress]); // سرعنا الانيميشن شوية
     const animatedPathProps = useAnimatedProps(() => { 
         const angle = animatedProgress.value * 360; 
         if (angle <= 0) return { d: 'M 0 0' }; 
@@ -86,6 +83,7 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
             </Svg>
             <Animated.View style={[{ position: 'absolute', top: 0, left: 0, width: DOT_SIZE, height: DOT_SIZE, borderRadius: DOT_SIZE / 2, backgroundColor: theme.indicatorDot, borderWidth: 3, borderColor: theme.card, elevation: 3, shadowColor: "#000", shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.2, shadowRadius: 2 }, indicatorStyle]} />
             <View style={styles.summaryTextContainer}>
+                {/* الرقم بيتحرك هنا */}
                 <Text style={styles.progressCircleText(theme)}>{Math.round(Number(currentStepCount) || 0).toLocaleString('en-US')}</Text>
             </View>
         </View> 
@@ -97,12 +95,17 @@ const StepsScreen = () => {
     const isFetchingRef = useRef(false);
     
     const [theme, setTheme] = useState(lightTheme);
-    const [currentStepCount, setCurrentStepCount] = useState(0);
+    
+    // هنقسم الخطوات لحاجتين: أساس (من جوجل) + مباشر (من الحساس دلوقتي)
+    const [googleFitSteps, setGoogleFitSteps] = useState(0); 
+    const [liveSessionSteps, setLiveSessionSteps] = useState(0); 
+    const [displaySteps, setDisplaySteps] = useState(0);
+
     const [stepsGoal, setStepsGoal] = useState(10000);
     const [historicalData, setHistoricalData] = useState([]);
     const [rawStepsData, setRawStepsData] = useState({}); 
     const [loading, setLoading] = useState(true);
-    const [isGoogleFitConnected, setIsGoogleFitConnected] = useState(false); // ✅ رجعناها false عشان تفحص الاتصال
+    const [isGoogleFitConnected, setIsGoogleFitConnected] = useState(false); 
     const [isPromptVisible, setPromptVisible] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState('week');
     const [language, setLanguage] = useState('en');
@@ -121,7 +124,7 @@ const StepsScreen = () => {
         });
     }, [navigation, theme, language, isRTL]);
 
-    // ✅ رجعنا دالة جلب البيانات
+    // دالة جلب البيانات الأساسية من جوجل (للتاريخ وبداية اليوم)
     const fetchGoogleFitData = useCallback(async (shouldFetchHistory = true) => {
         if (isFetchingRef.current) return;
         isFetchingRef.current = true;
@@ -130,16 +133,6 @@ const StepsScreen = () => {
             const storedConnected = await AsyncStorage.getItem('isGoogleFitConnected');
             if (storedConnected !== 'true') {
                 setIsGoogleFitConnected(false);
-                isFetchingRef.current = false;
-                setLoading(false);
-                return;
-            }
-
-            try {
-                await GoogleFit.checkIsAuthorized();
-            } catch (err) {
-                console.log("Library check failed:", err);
-                setIsGoogleFitConnected(false);
                 setLoading(false);
                 isFetchingRef.current = false;
                 return;
@@ -147,48 +140,33 @@ const StepsScreen = () => {
 
             const isAuth = await GoogleFit.checkIsAuthorized();
             if (!isAuth) {
-                try {
-                    const authRes = await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] });
-                    if (!authRes.success) {
-                        setIsGoogleFitConnected(false);
-                        isFetchingRef.current = false;
-                        setLoading(false);
-                        return;
-                    }
-                } catch(e) {
-                    setIsGoogleFitConnected(false);
-                    isFetchingRef.current = false;
-                    setLoading(false);
-                    return;
-                }
+                try { await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] }); } catch(e){}
             }
-
             setIsGoogleFitConnected(true);
-            
-            try {
-                GoogleFit.startRecording((callback) => {}, ['step']);
-            } catch(e) { console.log("Start recording error", e); }
+            GoogleFit.startRecording((callback) => {}, ['step']);
 
+            // جلب خطوات اليوم كـ "أساس"
             const now = new Date();
             const startOfDay = new Date();
             startOfDay.setHours(0,0,0,0);
-            
             const todayOpts = { startDate: startOfDay.toISOString(), endDate: now.toISOString() };
-            try {
-                const todayRes = await GoogleFit.getDailyStepCountSamples(todayOpts);
-                if (todayRes && todayRes.length > 0) {
-                    let maxSteps = 0;
-                    todayRes.forEach(source => {
-                        if (source.steps && source.steps.length > 0) {
-                            source.steps.forEach(step => {
-                                if (step.value > maxSteps) maxSteps = step.value;
-                            });
-                        }
-                    });
-                    if (maxSteps > 0) setCurrentStepCount(maxSteps);
+            const todayRes = await GoogleFit.getDailyStepCountSamples(todayOpts);
+            
+            if (todayRes && todayRes.length > 0) {
+                let maxSteps = 0;
+                todayRes.forEach(source => {
+                    if (source.steps && source.steps.length > 0) {
+                        source.steps.forEach(step => {
+                            if (step.value > maxSteps) maxSteps = step.value;
+                        });
+                    }
+                });
+                if (maxSteps > 0) {
+                    setGoogleFitSteps(maxSteps); // نحفظ الأساس
                 }
-            } catch (e) { console.log("Today steps error", e); }
+            }
 
+            // جلب التاريخ
             if (shouldFetchHistory) {
                 try {
                     const daysToFetch = 30; 
@@ -223,62 +201,89 @@ const StepsScreen = () => {
         }
     }, []);
 
-    // ✅ رجعنا التحديث اللحظي
+    // ✅✅ الجزء السحري: تفعيل عداد Pedometer اللحظي ✅✅
     useEffect(() => {
-        let isObserverActive = true;
-        const startObserving = async () => {
-            if (isGoogleFitConnected) {
-                try {
-                    await GoogleFit.checkIsAuthorized();
-                    try { GoogleFit.unsubscribeListeners(); } catch(e){}
-                    if(!isObserverActive) return;
-
-                    GoogleFit.observeSteps((res) => {
-                        if (res && res.steps && res.steps.length > 0) {
-                            const newStepsToAdd = res.steps.reduce((acc, step) => acc + (step.value || 0), 0);
-                            if (newStepsToAdd > 0) {
-                                setCurrentStepCount(prev => prev + newStepsToAdd);
-                            }
-                        }
-                    });
-                } catch (error) { console.log("Observer failed:", error); }
+        let subscription;
+        const subscribeToPedometer = async () => {
+            const isAvailable = await Pedometer.isAvailableAsync();
+            if (isAvailable) {
+                // بنصفر عداد الجلسة لما نفتح الصفحة
+                setLiveSessionSteps(0);
+                
+                // ده بيسمع لكل خطوة "دلوقتي"
+                subscription = Pedometer.watchStepCount(result => {
+                    // كل خطوة بتزيد بتتحط هنا فوراً
+                    setLiveSessionSteps(result.steps);
+                });
             }
         };
-        startObserving();
-        return () => { isObserverActive = false; try { GoogleFit.unsubscribeListeners(); } catch (e) {} };
-    }, [isGoogleFitConnected]);
 
-    // ✅ رجعنا زر الربط
+        subscribeToPedometer();
+
+        return () => {
+            if (subscription) subscription.remove();
+        };
+    }, []);
+
+    // دمج الرقمين (رقم جوجل الصبح + خطواتك دلوقتي وانت فاتح التطبيق)
+    useEffect(() => {
+        // بناخد الأكبر عشان لو جوجل عمل تحديث (Sync) ومسح خطوات الجلسة
+        const total = googleFitSteps + liveSessionSteps;
+        // لو جوجل بعت رقم أكبر من مجموعنا (لأنه عمل Sync خلاص)، نعتمد جوجل
+        // لو لسه معملش Sync، نعتمد مجموعنا اللحظي
+        setDisplaySteps(prev => (total > prev ? total : prev));
+        
+        // تحديث بسيط لو جوجل بعت رقم جديد أكبر فجأة
+        if (googleFitSteps > displaySteps) {
+            setDisplaySteps(googleFitSteps);
+            setLiveSessionSteps(0); // تصفير المؤقت لأن جوجل ضافهم خلاص
+        }
+    }, [googleFitSteps, liveSessionSteps]);
+
+
+    // تحديث البيانات لما تفتح التطبيق
+    useFocusEffect(
+        useCallback(() => {
+            let isMounted = true;
+            const init = async () => {
+                const savedTheme = await AsyncStorage.getItem('isDarkMode');
+                if (isMounted) setTheme(savedTheme === 'true' ? darkTheme : lightTheme);
+                const savedLang = await AsyncStorage.getItem('appLanguage');
+                if (isMounted) setLanguage(savedLang || 'en'); 
+                const savedGoal = await AsyncStorage.getItem('stepsGoal');
+                if (isMounted && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
+
+                InteractionManager.runAfterInteractions(() => {
+                    if (isMounted) fetchGoogleFitData(true); 
+                });
+            };
+            init();
+            return () => { isMounted = false; };
+        }, [fetchGoogleFitData]) 
+    );
+
+    // باقي الكود زي ما هو (الرسم البياني واتصال جوجل فيت)
     const connectGoogleFit = async () => {
         try {
             let permissionGranted = true;
             if (Platform.OS === 'android' && Platform.Version >= 29) {
                 const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION);
-                if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-                    permissionGranted = false;
-                    Alert.alert(t('permissionDeniedTitle'), t('permissionDeniedMsg'));
-                    return;
-                }
+                if (granted !== PermissionsAndroid.RESULTS.GRANTED) permissionGranted = false;
             }
             if (permissionGranted) {
                 const options = { scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] };
-                try {
-                    const res = await GoogleFit.authorize(options);
-                    if (res.success) {
-                        setIsGoogleFitConnected(true);
-                        await AsyncStorage.setItem('isGoogleFitConnected', 'true');
-                        fetchGoogleFitData(true);
-                    } else {
-                        Alert.alert(t('errorTitle'), 'Connection failed');
-                    }
-                } catch (e) {
-                    Alert.alert(t('errorTitle'), 'Library Error: Try Rebuilding App');
+                const res = await GoogleFit.authorize(options);
+                if (res.success) {
+                    setIsGoogleFitConnected(true);
+                    await AsyncStorage.setItem('isGoogleFitConnected', 'true');
+                    fetchGoogleFitData(true);
                 }
             }
         } catch (error) { console.warn("Auth Error:", error); }
     };
 
     useEffect(() => {
+        // معالجة بيانات الرسم البياني (زي ما هي)
         try {
             if (selectedPeriod === 'week') {
                 const weekData = [];
@@ -287,10 +292,8 @@ const StepsScreen = () => {
                 const startOfWeek = new Date(today);
                 startOfWeek.setDate(today.getDate() - currentDayIndex); 
                 startOfWeek.setHours(0, 0, 0, 0);
-
                 const enDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                 const arDays = ['الاحد', 'الاتنين', 'الثلاثاء', 'الاربعاء', 'الخميس', 'الجمعه', 'السبت'];
-
                 for (let i = 0; i < 7; i++) {
                     const d = new Date(startOfWeek);
                     d.setDate(startOfWeek.getDate() + i);
@@ -301,6 +304,7 @@ const StepsScreen = () => {
                 }
                 setHistoricalData(weekData);
             } else {
+                // كود الشهر (زي ما هو)
                 const formattedData = [];
                 for (let i = 29; i >= 0; i--) {
                     const d = new Date();
@@ -321,31 +325,12 @@ const StepsScreen = () => {
                 }
                 setHistoricalData(weeklyData);
             }
-        } catch (err) { console.log("Chart Processing Error:", err); }
+        } catch (err) { }
     }, [selectedPeriod, rawStepsData, language]);
-
-    useFocusEffect(
-        useCallback(() => {
-            let isMounted = true;
-            const init = async () => {
-                const savedTheme = await AsyncStorage.getItem('isDarkMode');
-                if (isMounted) setTheme(savedTheme === 'true' ? darkTheme : lightTheme);
-                const savedLang = await AsyncStorage.getItem('appLanguage');
-                if (isMounted) setLanguage(savedLang || 'en'); 
-                const savedGoal = await AsyncStorage.getItem('stepsGoal');
-                if (isMounted && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
-
-                InteractionManager.runAfterInteractions(() => {
-                    if (isMounted) fetchGoogleFitData(true); // ✅ شغلنا الجلب
-                });
-            };
-            init();
-            return () => { isMounted = false; };
-        }, [fetchGoogleFitData]) 
-    );
     
-    const distance = (currentStepCount * STEP_LENGTH_KM).toFixed(2);
-    const calories = Math.round(currentStepCount * CALORIES_PER_STEP);
+    // الحسابات بتعتمد على الرقم المعروض (displaySteps)
+    const distance = (displaySteps * STEP_LENGTH_KM).toFixed(2);
+    const calories = Math.round(displaySteps * CALORIES_PER_STEP);
     const totalPeriodSteps = historicalData.reduce((sum, item) => sum + item.steps, 0);
     const averageDivisor = selectedPeriod === 'week' ? 7 : 30; 
     let totalRawStepsForPeriod = 0;
@@ -358,10 +343,9 @@ const StepsScreen = () => {
     const bestDayInPeriod = historicalData.length > 0 ? Math.max(...historicalData.map(d => d.steps)) : 0;
     const maxChartSteps = historicalData.length > 0 ? Math.max(...historicalData.map(d => d.steps), 1) : 1;
     const periodLabel = selectedPeriod === 'week' ? t('week') : t('month');
-    const progress = stepsGoal > 0 ? (currentStepCount / stepsGoal) : 0;
+    const progress = stepsGoal > 0 ? (displaySteps / stepsGoal) : 0;
 
     const renderTodaySummary = () => {
-        // ✅ رجعنا شرط الاتصال (يظهر زر الربط لو مش متصل)
         if (!isGoogleFitConnected && !loading) {
             return (
                 <View style={styles.errorContainer}>
@@ -377,7 +361,8 @@ const StepsScreen = () => {
         return (
             <>
                 <View> 
-                    <AnimatedStepsCircle size={180} strokeWidth={15} currentStepCount={currentStepCount} progress={progress} theme={theme} />
+                    {/* بنبعت displaySteps اللي بيتحدث لحظياً */}
+                    <AnimatedStepsCircle size={180} strokeWidth={15} currentStepCount={displaySteps} progress={progress} theme={theme} />
                 </View>
                 <View style={styles.subStatsContainer(isRTL)}>
                     <TouchableOpacity style={styles.subStatBox} onPress={() => setPromptVisible(true)}>
@@ -428,7 +413,6 @@ const StepsScreen = () => {
                     {renderTodaySummary()}
                 </View>
 
-                {/* ✅ رجعنا شرط الاتصال (يخفي الرسم البياني لو مش متصل) */}
                 {isGoogleFitConnected && (
                 <>
                     <View style={styles.card(theme)}>
