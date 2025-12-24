@@ -8,11 +8,11 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import GoogleFit, { Scopes } from 'react-native-google-fit'; 
-import { Pedometer } from 'expo-sensors'; // ✅ دي الإضافة السحرية للعد اللحظي
+import { Pedometer } from 'expo-sensors'; 
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, useAnimatedProps } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 
-// --- الثوابت والإعدادات ---
+// --- إعدادات الألوان والثوابت ---
 const STEP_LENGTH_KM = 0.000762;
 const CALORIES_PER_STEP = 0.04;
 
@@ -37,7 +37,7 @@ const translations = {
     en: { screenTitle: 'Steps Report', todaySteps: 'Today\'s Steps', kmUnit: ' km', calUnit: ' kcal', last7Days: 'Last 7 Days', last30Days: 'Last 30 Days', periodSummary: '{period} Summary', week: 'Week', month: 'Month', noData: 'No data to display.', periodStats: '{period} Statistics', avgSteps: 'Daily Average:', totalSteps: 'Total {period} Steps:', bestDay: 'Best day in {period}:', changeGoalTitle: 'Change Daily Goal', changeGoalMsg: 'Enter your new steps goal:', goalPlaceholder: 'Ex: 8000', cancel: 'Cancel', save: 'Save', goalTooLargeTitle: 'Goal Too Large', goalTooLargeMsg: 'Please enter a number less than {maxSteps}.', errorTitle: 'Error', invalidNumber: 'Please enter a valid number.', notAvailableTitle: 'Google Fit Disconnected', notAvailableMsg: 'Please connect Google Fit to view steps.', connectBtn: 'Connect Google Fit', permissionDeniedTitle: 'Permission Denied', permissionDeniedMsg: 'Please grant physical activity permission.', bestDayLabel: 'Best:' }
 };
 
-// --- الرسم ---
+// --- دوال الرسم ---
 const describeArc = (x, y, radius, startAngle, endAngle) => { 
     'worklet';
     if (typeof x !== 'number' || typeof y !== 'number' || typeof radius !== 'number' || isNaN(endAngle)) { return "M 0 0"; }
@@ -51,7 +51,7 @@ const describeArc = (x, y, radius, startAngle, endAngle) => {
 };
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
-// --- المكون الدائري ---
+// --- الدائرة المتحركة ---
 const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, theme }) => { 
     const RADIUS = size / 2; 
     const CENTER_RADIUS = RADIUS - strokeWidth / 2; 
@@ -59,7 +59,8 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
     const safeProgress = (isNaN(progress) || !isFinite(progress) || progress < 0) ? 0 : Math.min(progress, 1);
     const animatedProgress = useSharedValue(0); 
     
-    useEffect(() => { animatedProgress.value = withTiming(safeProgress, { duration: 500 }); }, [safeProgress]); // سرعنا الانيميشن شوية
+    // أنيميشن سريع جداً (300ms) عشان يحسسك بالسرعة
+    useEffect(() => { animatedProgress.value = withTiming(safeProgress, { duration: 300 }); }, [safeProgress]); 
     const animatedPathProps = useAnimatedProps(() => { 
         const angle = animatedProgress.value * 360; 
         if (angle <= 0) return { d: 'M 0 0' }; 
@@ -83,7 +84,7 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
             </Svg>
             <Animated.View style={[{ position: 'absolute', top: 0, left: 0, width: DOT_SIZE, height: DOT_SIZE, borderRadius: DOT_SIZE / 2, backgroundColor: theme.indicatorDot, borderWidth: 3, borderColor: theme.card, elevation: 3, shadowColor: "#000", shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.2, shadowRadius: 2 }, indicatorStyle]} />
             <View style={styles.summaryTextContainer}>
-                {/* الرقم بيتحرك هنا */}
+                {/* الرقم بيتعرض هنا */}
                 <Text style={styles.progressCircleText(theme)}>{Math.round(Number(currentStepCount) || 0).toLocaleString('en-US')}</Text>
             </View>
         </View> 
@@ -96,10 +97,11 @@ const StepsScreen = () => {
     
     const [theme, setTheme] = useState(lightTheme);
     
-    // هنقسم الخطوات لحاجتين: أساس (من جوجل) + مباشر (من الحساس دلوقتي)
-    const [googleFitSteps, setGoogleFitSteps] = useState(0); 
-    const [liveSessionSteps, setLiveSessionSteps] = useState(0); 
-    const [displaySteps, setDisplaySteps] = useState(0);
+    // المتغيرات المهمة للعد
+    const [baseGoogleSteps, setBaseGoogleSteps] = useState(0); // خطوات اليوم من جوجل لما فتحنا
+    const [initialSensorSteps, setInitialSensorSteps] = useState(null); // قراءة الحساس أول ما فتحنا
+    const [currentSensorSteps, setCurrentSensorSteps] = useState(null); // قراءة الحساس دلوقتي
+    const [displaySteps, setDisplaySteps] = useState(0); // الرقم اللي هيظهرلك
 
     const [stepsGoal, setStepsGoal] = useState(10000);
     const [historicalData, setHistoricalData] = useState([]);
@@ -113,6 +115,7 @@ const StepsScreen = () => {
     const isRTL = language === 'en'; 
     const t = (key) => translations[language]?.[key] || translations['en'][key] || key;
 
+    // --- إعدادات الهيدر ---
     useLayoutEffect(() => {
         navigation.setOptions({
             headerTitle: t('screenTitle'),
@@ -124,7 +127,7 @@ const StepsScreen = () => {
         });
     }, [navigation, theme, language, isRTL]);
 
-    // دالة جلب البيانات الأساسية من جوجل (للتاريخ وبداية اليوم)
+    // --- 1. جلب البيانات الأساسية من جوجل فيت (مرة واحدة عند الفتح) ---
     const fetchGoogleFitData = useCallback(async (shouldFetchHistory = true) => {
         if (isFetchingRef.current) return;
         isFetchingRef.current = true;
@@ -132,10 +135,7 @@ const StepsScreen = () => {
         try {
             const storedConnected = await AsyncStorage.getItem('isGoogleFitConnected');
             if (storedConnected !== 'true') {
-                setIsGoogleFitConnected(false);
-                setLoading(false);
-                isFetchingRef.current = false;
-                return;
+                setIsGoogleFitConnected(false); setLoading(false); isFetchingRef.current = false; return;
             }
 
             const isAuth = await GoogleFit.checkIsAuthorized();
@@ -145,7 +145,7 @@ const StepsScreen = () => {
             setIsGoogleFitConnected(true);
             GoogleFit.startRecording((callback) => {}, ['step']);
 
-            // جلب خطوات اليوم كـ "أساس"
+            // جلب خطوات اليوم من جوجل
             const now = new Date();
             const startOfDay = new Date();
             startOfDay.setHours(0,0,0,0);
@@ -156,17 +156,16 @@ const StepsScreen = () => {
                 let maxSteps = 0;
                 todayRes.forEach(source => {
                     if (source.steps && source.steps.length > 0) {
-                        source.steps.forEach(step => {
-                            if (step.value > maxSteps) maxSteps = step.value;
-                        });
+                        source.steps.forEach(step => { if (step.value > maxSteps) maxSteps = step.value; });
                     }
                 });
                 if (maxSteps > 0) {
-                    setGoogleFitSteps(maxSteps); // نحفظ الأساس
+                    setBaseGoogleSteps(maxSteps); // حفظنا الأساس
+                    setDisplaySteps(maxSteps); // عرضناه مبدئياً
                 }
             }
 
-            // جلب التاريخ
+            // جلب التاريخ (للشارت)
             if (shouldFetchHistory) {
                 try {
                     const daysToFetch = 30; 
@@ -182,66 +181,62 @@ const StepsScreen = () => {
                                 source.steps.forEach(step => {
                                     if(step.date) {
                                         const dateStr = step.date.slice(0, 10);
-                                        if (!finalData[dateStr] || step.value > finalData[dateStr]) {
-                                            finalData[dateStr] = step.value;
-                                        }
+                                        if (!finalData[dateStr] || step.value > finalData[dateStr]) finalData[dateStr] = step.value;
                                     }
                                 });
                             }
                         });
                     }
                     setRawStepsData(finalData);
-                } catch (e) { console.log("History error", e); }
+                } catch (e) { }
             }
         } catch (globalError) {
-            console.warn("Fetch Error:", globalError);
         } finally {
             setLoading(false);
             isFetchingRef.current = false;
         }
     }, []);
 
-    // ✅✅ الجزء السحري: تفعيل عداد Pedometer اللحظي ✅✅
+    // --- 2. تشغيل الحساس اللحظي ---
     useEffect(() => {
         let subscription;
-        const subscribeToPedometer = async () => {
+        const subscribe = async () => {
             const isAvailable = await Pedometer.isAvailableAsync();
             if (isAvailable) {
-                // بنصفر عداد الجلسة لما نفتح الصفحة
-                setLiveSessionSteps(0);
-                
-                // ده بيسمع لكل خطوة "دلوقتي"
+                // بنسمع للحساس
                 subscription = Pedometer.watchStepCount(result => {
-                    // كل خطوة بتزيد بتتحط هنا فوراً
-                    setLiveSessionSteps(result.steps);
+                    // أول قراءة بتوصل بنعتبرها نقطة الصفر بتاعتنا في الجلسة دي
+                    setInitialSensorSteps(prev => (prev === null ? result.steps : prev));
+                    // كل قراءة جديدة بنسجلها
+                    setCurrentSensorSteps(result.steps);
                 });
             }
         };
-
-        subscribeToPedometer();
-
-        return () => {
-            if (subscription) subscription.remove();
-        };
+        subscribe();
+        return () => { if (subscription) subscription.remove(); };
     }, []);
 
-    // دمج الرقمين (رقم جوجل الصبح + خطواتك دلوقتي وانت فاتح التطبيق)
+    // --- 3. معادلة الدمج (السحر كله هنا) ---
     useEffect(() => {
-        // بناخد الأكبر عشان لو جوجل عمل تحديث (Sync) ومسح خطوات الجلسة
-        const total = googleFitSteps + liveSessionSteps;
-        // لو جوجل بعت رقم أكبر من مجموعنا (لأنه عمل Sync خلاص)، نعتمد جوجل
-        // لو لسه معملش Sync، نعتمد مجموعنا اللحظي
-        setDisplaySteps(prev => (total > prev ? total : prev));
-        
-        // تحديث بسيط لو جوجل بعت رقم جديد أكبر فجأة
-        if (googleFitSteps > displaySteps) {
-            setDisplaySteps(googleFitSteps);
-            setLiveSessionSteps(0); // تصفير المؤقت لأن جوجل ضافهم خلاص
+        if (initialSensorSteps !== null && currentSensorSteps !== null) {
+            // الفرق بين خطوات دلوقتي وأول ما فتحنا الشاشة
+            const stepsWalkedNow = currentSensorSteps - initialSensorSteps;
+            
+            // بنضيف الفرق ده على رقم جوجل اللي جبناه الصبح
+            // شرط: stepsWalkedNow لازم يكون موجب
+            if (stepsWalkedNow > 0) {
+                const newTotal = baseGoogleSteps + stepsWalkedNow;
+                // بنعرض الأكبر دايماً عشان لو جوجل عمل sync ما نرجعش لورا
+                setDisplaySteps(prev => (newTotal > prev ? newTotal : prev));
+            }
+        } else {
+             // لو الحساس لسه ما اشتغلش، اعرض رقم جوجل بس
+             setDisplaySteps(prev => (baseGoogleSteps > prev ? baseGoogleSteps : prev));
         }
-    }, [googleFitSteps, liveSessionSteps]);
+    }, [baseGoogleSteps, initialSensorSteps, currentSensorSteps]);
 
 
-    // تحديث البيانات لما تفتح التطبيق
+    // --- تحديث البيانات عند فتح الشاشة ---
     useFocusEffect(
         useCallback(() => {
             let isMounted = true;
@@ -254,15 +249,19 @@ const StepsScreen = () => {
                 if (isMounted && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
 
                 InteractionManager.runAfterInteractions(() => {
-                    if (isMounted) fetchGoogleFitData(true); 
+                    if (isMounted) {
+                        fetchGoogleFitData(true);
+                        // بنصفر الحساسات عشان نبدأ عد جديد من اللحظة دي
+                        setInitialSensorSteps(null); 
+                        setCurrentSensorSteps(null);
+                    }
                 });
             };
             init();
             return () => { isMounted = false; };
         }, [fetchGoogleFitData]) 
     );
-
-    // باقي الكود زي ما هو (الرسم البياني واتصال جوجل فيت)
+    
     const connectGoogleFit = async () => {
         try {
             let permissionGranted = true;
@@ -282,8 +281,8 @@ const StepsScreen = () => {
         } catch (error) { console.warn("Auth Error:", error); }
     };
 
+    // معالجة الشارت (زي ما هي)
     useEffect(() => {
-        // معالجة بيانات الرسم البياني (زي ما هي)
         try {
             if (selectedPeriod === 'week') {
                 const weekData = [];
@@ -304,7 +303,6 @@ const StepsScreen = () => {
                 }
                 setHistoricalData(weekData);
             } else {
-                // كود الشهر (زي ما هو)
                 const formattedData = [];
                 for (let i = 29; i >= 0; i--) {
                     const d = new Date();
@@ -328,7 +326,6 @@ const StepsScreen = () => {
         } catch (err) { }
     }, [selectedPeriod, rawStepsData, language]);
     
-    // الحسابات بتعتمد على الرقم المعروض (displaySteps)
     const distance = (displaySteps * STEP_LENGTH_KM).toFixed(2);
     const calories = Math.round(displaySteps * CALORIES_PER_STEP);
     const totalPeriodSteps = historicalData.reduce((sum, item) => sum + item.steps, 0);
@@ -361,7 +358,6 @@ const StepsScreen = () => {
         return (
             <>
                 <View> 
-                    {/* بنبعت displaySteps اللي بيتحدث لحظياً */}
                     <AnimatedStepsCircle size={180} strokeWidth={15} currentStepCount={displaySteps} progress={progress} theme={theme} />
                 </View>
                 <View style={styles.subStatsContainer(isRTL)}>
@@ -425,13 +421,7 @@ const StepsScreen = () => {
                         <View style={styles.chartContainer(isRTL)}>
                             {historicalData.map((item, index) => ( 
                                 <View key={index} style={styles.barWrapper}>
-                                    <View style={[
-                                        styles.bar(theme), 
-                                        {
-                                            height: `${Math.max((item.steps / maxChartSteps) * 100, 5)}%`, 
-                                            width: selectedPeriod === 'month' ? '60%' : '75%' 
-                                        }
-                                    ]} />
+                                    <View style={[ styles.bar(theme), { height: `${Math.max((item.steps / maxChartSteps) * 100, 5)}%`, width: selectedPeriod === 'month' ? '60%' : '75%' }]} />
                                     <Text style={styles.barLabel(theme)} numberOfLines={1}>{item.day}</Text>
                                 </View> 
                             ))}
@@ -462,35 +452,24 @@ const StepsScreen = () => {
     );
 };
 
+// ... نفس الـ styles اللي كانت معاك ...
 const styles = {
     modalPage: (theme) => ({ flex: 1, backgroundColor: theme.background }),
     modalPageContent: { padding: 20 },
     card: (theme) => ({ backgroundColor: theme.card, borderRadius: 20, padding: 20, marginBottom: 15, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5 }),
-    sectionTitle: (theme, isRTL) => ({ 
-        fontSize: 22, fontWeight: 'bold', color: theme.textPrimary, textAlign: isRTL ? 'right' : 'left', alignSelf: 'stretch', marginBottom: 4, marginTop: 15 
-    }),
+    sectionTitle: (theme, isRTL) => ({ fontSize: 22, fontWeight: 'bold', color: theme.textPrimary, textAlign: isRTL ? 'right' : 'left', alignSelf: 'stretch', marginBottom: 4, marginTop: 15 }),
     todaySummaryCard: { alignItems: 'center', paddingVertical: 30 },
     todaySummaryLabel: (theme) => ({ fontSize: 16, color: theme.textSecondary, marginBottom: 20 }),
     progressCircleText: (theme) => ({ fontSize: 36, fontWeight: 'bold', color: theme.textPrimary }),
     summaryTextContainer: { position: 'absolute', justifyContent: 'center', alignItems: 'center' },
-    subStatsContainer: (isRTL) => ({ 
-        flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-around', width: '100%', marginTop: 25 
-    }),
+    subStatsContainer: (isRTL) => ({ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-around', width: '100%', marginTop: 25 }),
     subStatBox: { alignItems: 'center', padding: 10 },
     subStatText: (theme) => ({ fontSize: 16, fontWeight: '600', color: theme.textPrimary, marginTop: 5 }),
-    chartContainer: (isRTL) => ({ 
-        flexDirection: isRTL ? 'row-reverse' : 'row', 
-        justifyContent: 'space-around', 
-        alignItems: 'flex-end', 
-        height: 150, 
-        marginTop: 20 
-    }), 
+    chartContainer: (isRTL) => ({ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-around', alignItems: 'flex-end', height: 150, marginTop: 20 }), 
     barWrapper: { flex: 1, alignItems: 'center', height: '100%', justifyContent: 'flex-end' }, 
     barLabel: (theme) => ({ marginTop: 5, fontSize: 10, color: theme.textSecondary, textAlign: 'center' }),
     bar: (theme) => ({ backgroundColor: theme.primary, borderRadius: 5, minHeight: 5 }),
-    statsRow: (theme, isRTL) => ({ 
-        flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: theme.background 
-    }),
+    statsRow: (theme, isRTL) => ({ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: theme.background }),
     statLabel: (theme, isRTL) => ({ fontSize: 16, color: theme.textSecondary, textAlign: isRTL ? 'right' : 'left' }),
     statValue: (theme, isRTL) => ({ fontSize: 16, fontWeight: 'bold', color: theme.textPrimary, textAlign: isRTL ? 'left' : 'right' }),
     modalOverlay: (theme) => ({ flex: 1, backgroundColor: theme.overlay, justifyContent: 'center', alignItems: 'center' }),
@@ -500,9 +479,7 @@ const styles = {
     promptButton: { paddingVertical: 10, paddingHorizontal: 25, borderRadius: 8, alignItems: 'center' },
     promptButtonPrimary: (theme) => ({ backgroundColor: theme.primary }),
     promptButtonTextPrimary: { color: 'white', fontWeight: 'bold' },
-    periodToggleContainer: (theme, isRTL) => ({ 
-        flexDirection: isRTL ? 'row-reverse' : 'row', backgroundColor: theme.background, borderRadius: 10, padding: 4, marginBottom: 10 
-    }),
+    periodToggleContainer: (theme, isRTL) => ({ flexDirection: isRTL ? 'row-reverse' : 'row', backgroundColor: theme.background, borderRadius: 10, padding: 4, marginBottom: 10 }),
     periodToggleButton: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
     activePeriodButton: (theme) => ({ backgroundColor: theme.card, elevation: 2 }),
     periodButtonText: (theme) => ({ fontSize: 16, fontWeight: '600', color: theme.textSecondary }),
