@@ -8,7 +8,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import GoogleFit, { Scopes } from 'react-native-google-fit'; 
-import { Pedometer } from 'expo-sensors'; 
+import { Pedometer } from 'expo-sensors'; // ✅ تأكد إنك عامل npx expo install expo-sensors
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, useAnimatedProps } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 
@@ -59,7 +59,7 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
     const safeProgress = (isNaN(progress) || !isFinite(progress) || progress < 0) ? 0 : Math.min(progress, 1);
     const animatedProgress = useSharedValue(0); 
     
-    // أنيميشن سريع جداً (300ms) عشان يحسسك بالسرعة
+    // أنيميشن سريع (300ms) للتحديث اللحظي
     useEffect(() => { animatedProgress.value = withTiming(safeProgress, { duration: 300 }); }, [safeProgress]); 
     const animatedPathProps = useAnimatedProps(() => { 
         const angle = animatedProgress.value * 360; 
@@ -84,7 +84,7 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
             </Svg>
             <Animated.View style={[{ position: 'absolute', top: 0, left: 0, width: DOT_SIZE, height: DOT_SIZE, borderRadius: DOT_SIZE / 2, backgroundColor: theme.indicatorDot, borderWidth: 3, borderColor: theme.card, elevation: 3, shadowColor: "#000", shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.2, shadowRadius: 2 }, indicatorStyle]} />
             <View style={styles.summaryTextContainer}>
-                {/* الرقم بيتعرض هنا */}
+                {/* الرقم اللي بيزيد بسرعة */}
                 <Text style={styles.progressCircleText(theme)}>{Math.round(Number(currentStepCount) || 0).toLocaleString('en-US')}</Text>
             </View>
         </View> 
@@ -97,11 +97,11 @@ const StepsScreen = () => {
     
     const [theme, setTheme] = useState(lightTheme);
     
-    // المتغيرات المهمة للعد
-    const [baseGoogleSteps, setBaseGoogleSteps] = useState(0); // خطوات اليوم من جوجل لما فتحنا
-    const [initialSensorSteps, setInitialSensorSteps] = useState(null); // قراءة الحساس أول ما فتحنا
-    const [currentSensorSteps, setCurrentSensorSteps] = useState(null); // قراءة الحساس دلوقتي
-    const [displaySteps, setDisplaySteps] = useState(0); // الرقم اللي هيظهرلك
+    // متغيرات العد
+    const [googleFitBase, setGoogleFitBase] = useState(0); // الرقم الأساسي من جوجل
+    const [pedometerStart, setPedometerStart] = useState(0); // قراءة العداد عند الفتح
+    const [pedometerCurrent, setPedometerCurrent] = useState(0); // قراءة العداد دلوقتي
+    const [displaySteps, setDisplaySteps] = useState(0); // الرقم اللي بيظهر
 
     const [stepsGoal, setStepsGoal] = useState(10000);
     const [historicalData, setHistoricalData] = useState([]);
@@ -115,7 +115,6 @@ const StepsScreen = () => {
     const isRTL = language === 'en'; 
     const t = (key) => translations[language]?.[key] || translations['en'][key] || key;
 
-    // --- إعدادات الهيدر ---
     useLayoutEffect(() => {
         navigation.setOptions({
             headerTitle: t('screenTitle'),
@@ -127,7 +126,7 @@ const StepsScreen = () => {
         });
     }, [navigation, theme, language, isRTL]);
 
-    // --- 1. جلب البيانات الأساسية من جوجل فيت (مرة واحدة عند الفتح) ---
+    // 1. جلب البيانات من جوجل فيت (الأساس)
     const fetchGoogleFitData = useCallback(async (shouldFetchHistory = true) => {
         if (isFetchingRef.current) return;
         isFetchingRef.current = true;
@@ -160,12 +159,13 @@ const StepsScreen = () => {
                     }
                 });
                 if (maxSteps > 0) {
-                    setBaseGoogleSteps(maxSteps); // حفظنا الأساس
-                    setDisplaySteps(maxSteps); // عرضناه مبدئياً
+                    setGoogleFitBase(maxSteps); 
+                    // لو العداد لسه ما بدأش، اعرض رقم جوجل
+                    setDisplaySteps(prev => (maxSteps > prev ? maxSteps : prev));
                 }
             }
 
-            // جلب التاريخ (للشارت)
+            // جلب التاريخ
             if (shouldFetchHistory) {
                 try {
                     const daysToFetch = 30; 
@@ -197,46 +197,47 @@ const StepsScreen = () => {
         }
     }, []);
 
-    // --- 2. تشغيل الحساس اللحظي ---
+    // 2. تشغيل العداد اللحظي (Pedometer) مع طلب الصلاحيات
     useEffect(() => {
         let subscription;
-        const subscribe = async () => {
+        const startPedometer = async () => {
             const isAvailable = await Pedometer.isAvailableAsync();
             if (isAvailable) {
-                // بنسمع للحساس
-                subscription = Pedometer.watchStepCount(result => {
-                    // أول قراءة بتوصل بنعتبرها نقطة الصفر بتاعتنا في الجلسة دي
-                    setInitialSensorSteps(prev => (prev === null ? result.steps : prev));
-                    // كل قراءة جديدة بنسجلها
-                    setCurrentSensorSteps(result.steps);
-                });
+                // طلب الصلاحية الخاصة بـ Expo Sensors (مهمة جداً)
+                const perm = await Pedometer.requestPermissionsAsync();
+                if (perm.granted) {
+                    // بنبدأ نسمع للعداد
+                    subscription = Pedometer.watchStepCount(result => {
+                        // في أول قراءة بنسجل نقطة البداية
+                        setPedometerStart(prev => (prev === 0 ? result.steps : prev));
+                        // بنسجل القراءة الحالية
+                        setPedometerCurrent(result.steps);
+                    });
+                }
             }
         };
-        subscribe();
-        return () => { if (subscription) subscription.remove(); };
+
+        startPedometer();
+
+        return () => {
+            if (subscription) subscription.remove();
+        };
     }, []);
 
-    // --- 3. معادلة الدمج (السحر كله هنا) ---
+    // 3. معادلة الدمج (الحساب اللحظي)
     useEffect(() => {
-        if (initialSensorSteps !== null && currentSensorSteps !== null) {
-            // الفرق بين خطوات دلوقتي وأول ما فتحنا الشاشة
-            const stepsWalkedNow = currentSensorSteps - initialSensorSteps;
-            
-            // بنضيف الفرق ده على رقم جوجل اللي جبناه الصبح
-            // شرط: stepsWalkedNow لازم يكون موجب
-            if (stepsWalkedNow > 0) {
-                const newTotal = baseGoogleSteps + stepsWalkedNow;
-                // بنعرض الأكبر دايماً عشان لو جوجل عمل sync ما نرجعش لورا
-                setDisplaySteps(prev => (newTotal > prev ? newTotal : prev));
+        // لو العداد شغال وبدأ يبعت أرقام
+        if (pedometerCurrent > 0 && pedometerStart > 0) {
+            // الفرق = خطواتك دلوقتي - خطواتك أول ما فتحت
+            const delta = pedometerCurrent - pedometerStart;
+            if (delta > 0) {
+                // الرقم الجديد = رقم جوجل الصبح + خطواتك دلوقتي
+                const newTotal = googleFitBase + delta;
+                setDisplaySteps(newTotal);
             }
-        } else {
-             // لو الحساس لسه ما اشتغلش، اعرض رقم جوجل بس
-             setDisplaySteps(prev => (baseGoogleSteps > prev ? baseGoogleSteps : prev));
         }
-    }, [baseGoogleSteps, initialSensorSteps, currentSensorSteps]);
+    }, [googleFitBase, pedometerStart, pedometerCurrent]);
 
-
-    // --- تحديث البيانات عند فتح الشاشة ---
     useFocusEffect(
         useCallback(() => {
             let isMounted = true;
@@ -251,9 +252,9 @@ const StepsScreen = () => {
                 InteractionManager.runAfterInteractions(() => {
                     if (isMounted) {
                         fetchGoogleFitData(true);
-                        // بنصفر الحساسات عشان نبدأ عد جديد من اللحظة دي
-                        setInitialSensorSteps(null); 
-                        setCurrentSensorSteps(null);
+                        // تصفير مؤقت العداد عند العودة عشان نبدأ حساب جديد
+                        setPedometerStart(0);
+                        setPedometerCurrent(0);
                     }
                 });
             };
@@ -262,6 +263,7 @@ const StepsScreen = () => {
         }, [fetchGoogleFitData]) 
     );
     
+    // باقي دوال الاتصال والواجهة (زي ما هي)
     const connectGoogleFit = async () => {
         try {
             let permissionGranted = true;
@@ -281,7 +283,6 @@ const StepsScreen = () => {
         } catch (error) { console.warn("Auth Error:", error); }
     };
 
-    // معالجة الشارت (زي ما هي)
     useEffect(() => {
         try {
             if (selectedPeriod === 'week') {
@@ -452,7 +453,6 @@ const StepsScreen = () => {
     );
 };
 
-// ... نفس الـ styles اللي كانت معاك ...
 const styles = {
     modalPage: (theme) => ({ flex: 1, backgroundColor: theme.background }),
     modalPageContent: { padding: 20 },
