@@ -289,7 +289,7 @@ const StepsScreen = () => {
                 startOfWeek.setHours(0, 0, 0, 0);
 
                 const enDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                const arDays = ['أحد', 'اثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت'];
+                const arDays = ['الاحد', 'الاتنين', 'الثلاثاء', 'الاربعاء', 'الخميس', 'الجمعه', 'السبت'];
 
                 for (let i = 0; i < 7; i++) {
                     const d = new Date(startOfWeek);
