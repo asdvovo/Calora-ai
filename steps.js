@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
 import { 
     StyleSheet, View, Text, ScrollView, SafeAreaView, TouchableOpacity, 
-    ActivityIndicator, Alert, Modal, TextInput, StatusBar,
+    ActivityIndicator, Modal, TextInput, StatusBar,
     Platform, PermissionsAndroid, AppState, InteractionManager 
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import GoogleFit, { Scopes } from 'react-native-google-fit'; 
-import { Pedometer } from 'expo-sensors'; // ✅ تأكد إنك عامل npx expo install expo-sensors
+import { Pedometer } from 'expo-sensors'; 
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, useAnimatedProps } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 
@@ -59,7 +59,6 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
     const safeProgress = (isNaN(progress) || !isFinite(progress) || progress < 0) ? 0 : Math.min(progress, 1);
     const animatedProgress = useSharedValue(0); 
     
-    // أنيميشن سريع (300ms) للتحديث اللحظي
     useEffect(() => { animatedProgress.value = withTiming(safeProgress, { duration: 300 }); }, [safeProgress]); 
     const animatedPathProps = useAnimatedProps(() => { 
         const angle = animatedProgress.value * 360; 
@@ -71,7 +70,7 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
         const x = (size / 2) + CENTER_RADIUS * Math.cos(angleInRad);
         const y = (size / 2) + CENTER_RADIUS * Math.sin(angleInRad);
         return {
-            transform: [ { translateX: x - (DOT_SIZE / 2) + -155 }, { translateY: y - (DOT_SIZE / 2) } ],
+            transform: [ { translateX: x - (DOT_SIZE / 2) - 155 }, { translateY: y - (DOT_SIZE / 2) } ],
             opacity: 1 
         };
     });
@@ -84,7 +83,6 @@ const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, th
             </Svg>
             <Animated.View style={[{ position: 'absolute', top: 0, left: 0, width: DOT_SIZE, height: DOT_SIZE, borderRadius: DOT_SIZE / 2, backgroundColor: theme.indicatorDot, borderWidth: 3, borderColor: theme.card, elevation: 3, shadowColor: "#000", shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.2, shadowRadius: 2 }, indicatorStyle]} />
             <View style={styles.summaryTextContainer}>
-                {/* الرقم اللي بيزيد بسرعة */}
                 <Text style={styles.progressCircleText(theme)}>{Math.round(Number(currentStepCount) || 0).toLocaleString('en-US')}</Text>
             </View>
         </View> 
@@ -97,11 +95,11 @@ const StepsScreen = () => {
     
     const [theme, setTheme] = useState(lightTheme);
     
-    // متغيرات العد
-    const [googleFitBase, setGoogleFitBase] = useState(0); // الرقم الأساسي من جوجل
-    const [pedometerStart, setPedometerStart] = useState(0); // قراءة العداد عند الفتح
-    const [pedometerCurrent, setPedometerCurrent] = useState(0); // قراءة العداد دلوقتي
-    const [displaySteps, setDisplaySteps] = useState(0); // الرقم اللي بيظهر
+    // --- متغيرات التتبع المباشر (refs عشان السرعة وعدم انتظار الريندر) ---
+    const initialSensorStepsRef = useRef(null); // أول قراءة من الحساس عند فتح التطبيق
+    const googleFitBaseRef = useRef(0);         // قراءة جوجل فيت الأساسية
+    
+    const [displaySteps, setDisplaySteps] = useState(0); 
 
     const [stepsGoal, setStepsGoal] = useState(10000);
     const [historicalData, setHistoricalData] = useState([]);
@@ -111,6 +109,8 @@ const StepsScreen = () => {
     const [isPromptVisible, setPromptVisible] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState('week');
     const [language, setLanguage] = useState('en');
+    
+    const [selectedBarIndex, setSelectedBarIndex] = useState(null);
 
     const isRTL = language === 'en'; 
     const t = (key) => translations[language]?.[key] || translations['en'][key] || key;
@@ -126,7 +126,7 @@ const StepsScreen = () => {
         });
     }, [navigation, theme, language, isRTL]);
 
-    // 1. جلب البيانات من جوجل فيت (الأساس)
+    // --- جلب بيانات جوجل فيت (قاعدة البيانات الأساسية) ---
     const fetchGoogleFitData = useCallback(async (shouldFetchHistory = true) => {
         if (isFetchingRef.current) return;
         isFetchingRef.current = true;
@@ -144,7 +144,6 @@ const StepsScreen = () => {
             setIsGoogleFitConnected(true);
             GoogleFit.startRecording((callback) => {}, ['step']);
 
-            // جلب خطوات اليوم من جوجل
             const now = new Date();
             const startOfDay = new Date();
             startOfDay.setHours(0,0,0,0);
@@ -159,14 +158,16 @@ const StepsScreen = () => {
                     }
                 });
                 if (maxSteps > 0) {
-                    setGoogleFitBase(maxSteps); 
-                    // لو العداد لسه ما بدأش، اعرض رقم جوجل
-                    setDisplaySteps(prev => (maxSteps > prev ? maxSteps : prev));
+                    googleFitBaseRef.current = maxSteps; // تحديث الـ Ref للقاعدة
+                    // تحديث العرض إذا لم يكن الحساس قد بدأ العمل بعد
+                    if (initialSensorStepsRef.current === null) {
+                         setDisplaySteps(maxSteps);
+                    }
                 }
             }
 
-            // جلب التاريخ
             if (shouldFetchHistory) {
+                // ... (نفس كود جلب التاريخ كما هو)
                 try {
                     const daysToFetch = 30; 
                     const historyStart = new Date();
@@ -191,27 +192,38 @@ const StepsScreen = () => {
                 } catch (e) { }
             }
         } catch (globalError) {
+            console.log(globalError);
         } finally {
             setLoading(false);
             isFetchingRef.current = false;
         }
     }, []);
 
-    // 2. تشغيل العداد اللحظي (Pedometer) مع طلب الصلاحيات
+    // --- كود الحساس المباشر (التعديل الرئيسي هنا) ---
     useEffect(() => {
         let subscription;
         const startPedometer = async () => {
             const isAvailable = await Pedometer.isAvailableAsync();
             if (isAvailable) {
-                // طلب الصلاحية الخاصة بـ Expo Sensors (مهمة جداً)
+                // طلب الصلاحية لو لم تكن ممنوحة
                 const perm = await Pedometer.requestPermissionsAsync();
                 if (perm.granted) {
-                    // بنبدأ نسمع للعداد
                     subscription = Pedometer.watchStepCount(result => {
-                        // في أول قراءة بنسجل نقطة البداية
-                        setPedometerStart(prev => (prev === 0 ? result.steps : prev));
-                        // بنسجل القراءة الحالية
-                        setPedometerCurrent(result.steps);
+                        // result.steps في الأندرويد هو إجمالي الخطوات منذ تشغيل الهاتف
+                        
+                        if (initialSensorStepsRef.current === null) {
+                            // أول قراءة للحساس: نخزنها كمرجع صفر
+                            initialSensorStepsRef.current = result.steps;
+                        }
+
+                        // حساب الفرق (الخطوات اللي مشيتها دلوقتي حالا)
+                        const liveStepsDelta = result.steps - initialSensorStepsRef.current;
+                        
+                        // المعادلة: الأساس من جوجل فيت + اللي مشيته لايف
+                        const totalSteps = googleFitBaseRef.current + liveStepsDelta;
+
+                        // تحديث الشاشة فوراً
+                        setDisplaySteps(totalSteps);
                     });
                 }
             }
@@ -221,22 +233,10 @@ const StepsScreen = () => {
 
         return () => {
             if (subscription) subscription.remove();
+            // تصفير المرجع عند الخروج لتجنب الحسابات الخاطئة عند العودة
+            initialSensorStepsRef.current = null;
         };
     }, []);
-
-    // 3. معادلة الدمج (الحساب اللحظي)
-    useEffect(() => {
-        // لو العداد شغال وبدأ يبعت أرقام
-        if (pedometerCurrent > 0 && pedometerStart > 0) {
-            // الفرق = خطواتك دلوقتي - خطواتك أول ما فتحت
-            const delta = pedometerCurrent - pedometerStart;
-            if (delta > 0) {
-                // الرقم الجديد = رقم جوجل الصبح + خطواتك دلوقتي
-                const newTotal = googleFitBase + delta;
-                setDisplaySteps(newTotal);
-            }
-        }
-    }, [googleFitBase, pedometerStart, pedometerCurrent]);
 
     useFocusEffect(
         useCallback(() => {
@@ -252,9 +252,7 @@ const StepsScreen = () => {
                 InteractionManager.runAfterInteractions(() => {
                     if (isMounted) {
                         fetchGoogleFitData(true);
-                        // تصفير مؤقت العداد عند العودة عشان نبدأ حساب جديد
-                        setPedometerStart(0);
-                        setPedometerCurrent(0);
+                        // لاحظ: لا نقوم بتصفير Refs الحساس هنا حتى لا يقطع العد المباشر
                     }
                 });
             };
@@ -263,7 +261,6 @@ const StepsScreen = () => {
         }, [fetchGoogleFitData]) 
     );
     
-    // باقي دوال الاتصال والواجهة (زي ما هي)
     const connectGoogleFit = async () => {
         try {
             let permissionGranted = true;
@@ -284,6 +281,7 @@ const StepsScreen = () => {
     };
 
     useEffect(() => {
+        setSelectedBarIndex(null);
         try {
             if (selectedPeriod === 'week') {
                 const weekData = [];
@@ -420,12 +418,36 @@ const StepsScreen = () => {
                         <Text style={styles.sectionTitle(theme, isRTL)}>{t('periodSummary').replace('{period}', periodLabel)}</Text>
                         
                         <View style={styles.chartContainer(isRTL)}>
-                            {historicalData.map((item, index) => ( 
-                                <View key={index} style={styles.barWrapper}>
-                                    <View style={[ styles.bar(theme), { height: `${Math.max((item.steps / maxChartSteps) * 100, 5)}%`, width: selectedPeriod === 'month' ? '60%' : '75%' }]} />
-                                    <Text style={styles.barLabel(theme)} numberOfLines={1}>{item.day}</Text>
-                                </View> 
-                            ))}
+                            {historicalData.map((item, index) => {
+                                const isSelected = selectedBarIndex === index;
+                                return ( 
+                                    <TouchableOpacity 
+                                        key={index} 
+                                        style={styles.barWrapper}
+                                        onPress={() => setSelectedBarIndex(isSelected ? null : index)}
+                                        activeOpacity={0.8}
+                                    >
+                                        {isSelected && (
+                                            <View style={styles.tooltipContainer}>
+                                                <View style={styles.tooltipBubble}>
+                                                    <Text style={styles.tooltipText}>{item.steps.toLocaleString('en-US')}</Text>
+                                                </View>
+                                                <View style={styles.tooltipArrow} />
+                                            </View>
+                                        )}
+                                        
+                                        <View style={[ 
+                                            styles.bar(theme), 
+                                            { 
+                                                height: `${Math.max((item.steps / maxChartSteps) * 100, 5)}%`, 
+                                                width: selectedPeriod === 'month' ? '60%' : '75%',
+                                                opacity: isSelected ? 1 : 0.7 
+                                            }
+                                        ]} />
+                                        <Text style={styles.barLabel(theme)} numberOfLines={1}>{item.day}</Text>
+                                    </TouchableOpacity> 
+                                );
+                            })}
                         </View> 
                     </View>
 
@@ -466,7 +488,7 @@ const styles = {
     subStatBox: { alignItems: 'center', padding: 10 },
     subStatText: (theme) => ({ fontSize: 16, fontWeight: '600', color: theme.textPrimary, marginTop: 5 }),
     chartContainer: (isRTL) => ({ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-around', alignItems: 'flex-end', height: 150, marginTop: 20 }), 
-    barWrapper: { flex: 1, alignItems: 'center', height: '100%', justifyContent: 'flex-end' }, 
+    barWrapper: { flex: 1, alignItems: 'center', height: '100%', justifyContent: 'flex-end', position: 'relative' }, 
     barLabel: (theme) => ({ marginTop: 5, fontSize: 10, color: theme.textSecondary, textAlign: 'center' }),
     bar: (theme) => ({ backgroundColor: theme.primary, borderRadius: 5, minHeight: 5 }),
     statsRow: (theme, isRTL) => ({ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: theme.background }),
@@ -489,6 +511,14 @@ const styles = {
     errorSubText: (theme) => ({ marginTop: 5, fontSize: 14, color: theme.textSecondary, textAlign: 'center', marginBottom: 20 }),
     connectButton: (theme) => ({ backgroundColor: theme.primary, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 }),
     connectButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+    tooltipContainer: { position: 'absolute', bottom: '100%', marginBottom: -120, alignItems: 'center', zIndex: 10 },
+    tooltipBubble: { backgroundColor: '#000000', borderRadius: 8, paddingVertical: 5, paddingHorizontal: 10 },
+    tooltipText: { color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
+    tooltipArrow: { 
+        width: 0, height: 0, backgroundColor: 'transparent', borderStyle: 'solid', 
+        borderLeftWidth: 6, borderRightWidth: 6, borderBottomWidth: 0, borderTopWidth: 6, 
+        borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: '#000000', 
+    },
 };
 
 export default StepsScreen;
