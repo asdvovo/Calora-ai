@@ -95,9 +95,8 @@ const StepsScreen = () => {
     
     const [theme, setTheme] = useState(lightTheme);
     
-    // --- متغيرات التتبع المباشر (refs عشان السرعة وعدم انتظار الريندر) ---
-    const initialSensorStepsRef = useRef(null); // أول قراءة من الحساس عند فتح التطبيق
-    const googleFitBaseRef = useRef(0);         // قراءة جوجل فيت الأساسية
+    const initialSensorStepsRef = useRef(null); 
+    const googleFitBaseRef = useRef(0);         
     
     const [displaySteps, setDisplaySteps] = useState(0); 
 
@@ -108,11 +107,16 @@ const StepsScreen = () => {
     const [isGoogleFitConnected, setIsGoogleFitConnected] = useState(false); 
     const [isPromptVisible, setPromptVisible] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState('week');
-    const [language, setLanguage] = useState('en');
+    
+    // ---------------------- التعديل الأول ----------------------
+    // تغيير اللغة الافتراضية إلى 'ar' (عربي)
+    const [language, setLanguage] = useState('ar');
     
     const [selectedBarIndex, setSelectedBarIndex] = useState(null);
 
-    const isRTL = language === 'en'; 
+    // ---------------------- التعديل الثاني ----------------------
+    // تصحيح منطق الـ RTL (من اليمين لليسار يكون true إذا كانت اللغة عربي)
+    const isRTL = language === 'ar'; 
     const t = (key) => translations[language]?.[key] || translations['en'][key] || key;
 
     useLayoutEffect(() => {
@@ -121,12 +125,13 @@ const StepsScreen = () => {
             headerTitleAlign: 'center',
             headerStyle: { backgroundColor: theme.card, shadowColor: 'transparent', elevation: 0 },
             headerTintColor: theme.textPrimary,
-            headerRight: isRTL ? () => <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginHorizontal: 15 }}><Ionicons name="arrow-back" size={24} color={theme.textPrimary} /></TouchableOpacity> : null,
-            headerLeft: !isRTL ? () => <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginHorizontal: 15 }}><Ionicons name="arrow-forward" size={24} color={theme.textPrimary} /></TouchableOpacity> : null,
+            // ---------------------- التعديل الثالث ----------------------
+            // عكس أماكن أزرار الرجوع بناءً على اللغة بشكل صحيح
+            headerLeft: isRTL ? () => <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginHorizontal: 15 }}><Ionicons name="arrow-forward" size={24} color={theme.textPrimary} /></TouchableOpacity> : null,
+            headerRight: !isRTL ? () => <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginHorizontal: 15 }}><Ionicons name="arrow-back" size={24} color={theme.textPrimary} /></TouchableOpacity> : null,
         });
     }, [navigation, theme, language, isRTL]);
 
-    // --- جلب بيانات جوجل فيت (قاعدة البيانات الأساسية) ---
     const fetchGoogleFitData = useCallback(async (shouldFetchHistory = true) => {
         if (isFetchingRef.current) return;
         isFetchingRef.current = true;
@@ -158,8 +163,7 @@ const StepsScreen = () => {
                     }
                 });
                 if (maxSteps > 0) {
-                    googleFitBaseRef.current = maxSteps; // تحديث الـ Ref للقاعدة
-                    // تحديث العرض إذا لم يكن الحساس قد بدأ العمل بعد
+                    googleFitBaseRef.current = maxSteps; 
                     if (initialSensorStepsRef.current === null) {
                          setDisplaySteps(maxSteps);
                     }
@@ -167,7 +171,6 @@ const StepsScreen = () => {
             }
 
             if (shouldFetchHistory) {
-                // ... (نفس كود جلب التاريخ كما هو)
                 try {
                     const daysToFetch = 30; 
                     const historyStart = new Date();
@@ -199,30 +202,19 @@ const StepsScreen = () => {
         }
     }, []);
 
-    // --- كود الحساس المباشر (التعديل الرئيسي هنا) ---
     useEffect(() => {
         let subscription;
         const startPedometer = async () => {
             const isAvailable = await Pedometer.isAvailableAsync();
             if (isAvailable) {
-                // طلب الصلاحية لو لم تكن ممنوحة
                 const perm = await Pedometer.requestPermissionsAsync();
                 if (perm.granted) {
                     subscription = Pedometer.watchStepCount(result => {
-                        // result.steps في الأندرويد هو إجمالي الخطوات منذ تشغيل الهاتف
-                        
                         if (initialSensorStepsRef.current === null) {
-                            // أول قراءة للحساس: نخزنها كمرجع صفر
                             initialSensorStepsRef.current = result.steps;
                         }
-
-                        // حساب الفرق (الخطوات اللي مشيتها دلوقتي حالا)
                         const liveStepsDelta = result.steps - initialSensorStepsRef.current;
-                        
-                        // المعادلة: الأساس من جوجل فيت + اللي مشيته لايف
                         const totalSteps = googleFitBaseRef.current + liveStepsDelta;
-
-                        // تحديث الشاشة فوراً
                         setDisplaySteps(totalSteps);
                     });
                 }
@@ -230,10 +222,8 @@ const StepsScreen = () => {
         };
 
         startPedometer();
-
         return () => {
             if (subscription) subscription.remove();
-            // تصفير المرجع عند الخروج لتجنب الحسابات الخاطئة عند العودة
             initialSensorStepsRef.current = null;
         };
     }, []);
@@ -244,15 +234,17 @@ const StepsScreen = () => {
             const init = async () => {
                 const savedTheme = await AsyncStorage.getItem('isDarkMode');
                 if (isMounted) setTheme(savedTheme === 'true' ? darkTheme : lightTheme);
+                
+                // هنا بنحاول نجيب اللغة المحفوظة، لو مفيش بنخليها 'ar'
                 const savedLang = await AsyncStorage.getItem('appLanguage');
-                if (isMounted) setLanguage(savedLang || 'en'); 
+                if (isMounted) setLanguage(savedLang || 'ar'); 
+
                 const savedGoal = await AsyncStorage.getItem('stepsGoal');
                 if (isMounted && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
 
                 InteractionManager.runAfterInteractions(() => {
                     if (isMounted) {
                         fetchGoogleFitData(true);
-                        // لاحظ: لا نقوم بتصفير Refs الحساس هنا حتى لا يقطع العد المباشر
                     }
                 });
             };
@@ -290,14 +282,21 @@ const StepsScreen = () => {
                 const startOfWeek = new Date(today);
                 startOfWeek.setDate(today.getDate() - currentDayIndex); 
                 startOfWeek.setHours(0, 0, 0, 0);
+
                 const enDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                const arDays = ['الاحد', 'الاتنين', 'الثلاثاء', 'الاربعاء', 'الخميس', 'الجمعه', 'السبت'];
+                // ---------------------- التعديل الرابع ----------------------
+                // تحسين أسماء الأيام العربية
+                const arDays = ['السبت', 'الجمعه', 'الخميس', 'الاربعاء', 'الثلاثاء', 'الاتنين', 'الاحد'];
+                
                 for (let i = 0; i < 7; i++) {
                     const d = new Date(startOfWeek);
                     d.setDate(startOfWeek.getDate() + i);
                     const offset = d.getTimezoneOffset() * 60000;
                     const dateKey = new Date(d.getTime() - offset).toISOString().split('T')[0];
+                    
+                    // هنا بيختار المصفوفة بناءً على اللغة اللي ظبطناها فوق
                     let dayName = language === 'ar' ? arDays[d.getDay()] : enDays[d.getDay()];
+                    
                     weekData.push({ day: dayName, steps: rawStepsData[dateKey] || 0 });
                 }
                 setHistoricalData(weekData);
@@ -420,6 +419,8 @@ const StepsScreen = () => {
                         <View style={styles.chartContainer(isRTL)}>
                             {historicalData.map((item, index) => {
                                 const isSelected = selectedBarIndex === index;
+                                const barHeightPercentage = Math.max((item.steps / maxChartSteps) * 100, 5);
+                                
                                 return ( 
                                     <TouchableOpacity 
                                         key={index} 
@@ -428,7 +429,13 @@ const StepsScreen = () => {
                                         activeOpacity={0.8}
                                     >
                                         {isSelected && (
-                                            <View style={styles.tooltipContainer}>
+                                            <View style={[
+                                                styles.tooltipContainer,
+                                                { 
+                                                    bottom: `${barHeightPercentage}%`,
+                                                    marginBottom: 22 
+                                                }
+                                            ]}>
                                                 <View style={styles.tooltipBubble}>
                                                     <Text style={styles.tooltipText}>{item.steps.toLocaleString('en-US')}</Text>
                                                 </View>
@@ -439,7 +446,7 @@ const StepsScreen = () => {
                                         <View style={[ 
                                             styles.bar(theme), 
                                             { 
-                                                height: `${Math.max((item.steps / maxChartSteps) * 100, 5)}%`, 
+                                                height: `${barHeightPercentage}%`, 
                                                 width: selectedPeriod === 'month' ? '60%' : '75%',
                                                 opacity: isSelected ? 1 : 0.7 
                                             }
@@ -511,7 +518,12 @@ const styles = {
     errorSubText: (theme) => ({ marginTop: 5, fontSize: 14, color: theme.textSecondary, textAlign: 'center', marginBottom: 20 }),
     connectButton: (theme) => ({ backgroundColor: theme.primary, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 }),
     connectButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-    tooltipContainer: { position: 'absolute', bottom: '100%', marginBottom: -120, alignItems: 'center', zIndex: 10 },
+    tooltipContainer: { 
+        position: 'absolute', 
+        alignItems: 'center', 
+        zIndex: 10,
+        width: 100 
+    },
     tooltipBubble: { backgroundColor: '#000000', borderRadius: 8, paddingVertical: 5, paddingHorizontal: 10 },
     tooltipText: { color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
     tooltipArrow: { 
