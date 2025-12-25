@@ -107,7 +107,12 @@ const StepsScreen = () => {
     const [language, setLanguage] = useState(I18nManager.isRTL ? 'ar' : 'en');
     const [selectedBarIndex, setSelectedBarIndex] = useState(null);
 
-    const isRTL = language === 'ar'; 
+    // **********************************************
+    // التغيير هنا: خلينا RTL لما اللغة تكون إنجليزي
+    // والعربي بقى بياخد false يعني LTR
+    // **********************************************
+    const isRTL = language === 'en'; 
+
     const t = (key) => translations[language]?.[key] || translations['en'][key] || key;
 
     useLayoutEffect(() => {
@@ -116,8 +121,8 @@ const StepsScreen = () => {
             headerTitleAlign: 'center',
             headerStyle: { backgroundColor: theme.card, shadowColor: 'transparent', elevation: 0 },
             headerTintColor: theme.textPrimary,
-            headerLeft: isRTL ? () => <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginHorizontal: 15 }}><Ionicons name="arrow-forward" size={24} color={theme.textPrimary} /></TouchableOpacity> : null,
-            headerRight: !isRTL ? () => <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginHorizontal: 15 }}><Ionicons name="arrow-back" size={24} color={theme.textPrimary} /></TouchableOpacity> : null,
+            headerRight: isRTL ? () => <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginHorizontal: 15 }}><Ionicons name="arrow-back" size={24} color={theme.textPrimary} /></TouchableOpacity> : null,
+            headerLeft: !isRTL ? () => <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginHorizontal: 15 }}><Ionicons name="arrow-forward" size={24} color={theme.textPrimary} /></TouchableOpacity> : null,
         });
     }, [navigation, theme, language, isRTL]);
 
@@ -191,12 +196,11 @@ const StepsScreen = () => {
         }
     }, []);
 
-    // --- التعديل هنا: حذفنا observeSteps المسببة للكراش واعتمدنا على Event Listener + تحديث سريع ---
     useFocusEffect(
         useCallback(() => {
             let isMounted = true;
-            let stepListener = null;
-            let fastInterval = null;
+            let intervalId = null;
+            let appStateSubscription = null;
 
             const init = async () => {
                 const savedTheme = await AsyncStorage.getItem('isDarkMode');
@@ -211,24 +215,14 @@ const StepsScreen = () => {
                 InteractionManager.runAfterInteractions(() => {
                     if (isMounted) {
                         fetchGoogleFitData(true, false);
-                        
-                        // 1. بدأ التسجيل (ضروري عشان العداد يشتغل)
-                        GoogleFit.startRecording((callback) => {
-                            // Recording started
-                        }, ['step']);
-
-                        // 2. محاولة الاستماع للحدث (لو الجهاز بيدعمها بدون observeSteps)
-                        try {
-                            stepListener = DeviceEventEmitter.addListener('StepChanged', (event) => {
-                                if (isMounted) fetchGoogleFitData(false, true);
-                            });
-                        } catch (e) { console.log("Listener Error", e); }
-
-                        // 3. الحل البديل الآمن: تحديث كل 1.5 ثانية (سريع جداً ومش بيعمل كراش)
-                        // ده هيضمن إن الرقم يزيد حتى لو الـ Event Listener مفعلش
-                        fastInterval = setInterval(() => {
+                        appStateSubscription = AppState.addEventListener('change', nextAppState => {
+                            if (nextAppState === 'active' && isMounted) {
+                                fetchGoogleFitData(false, true);
+                            }
+                        });
+                        intervalId = setInterval(() => {
                             if (isMounted) fetchGoogleFitData(false, true);
-                        }, 1500); 
+                        }, 10000); 
                     }
                 });
             };
@@ -236,9 +230,8 @@ const StepsScreen = () => {
 
             return () => { 
                 isMounted = false; 
-                if (stepListener) stepListener.remove();
-                if (fastInterval) clearInterval(fastInterval); // وقف التحديث السريع لما تخرج
-                // مش هنوقف GoogleFit.unsubscribeListeners عشان الكراش
+                if (intervalId) clearInterval(intervalId);
+                if (appStateSubscription) appStateSubscription.remove();
             };
         }, [fetchGoogleFitData]) 
     );

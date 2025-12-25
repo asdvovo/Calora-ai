@@ -36,12 +36,9 @@ import AboutScreen from './about';
 const STEPS_NOTIFICATION_TASK = 'steps-notification-task';
 
 // --- Helper for Layout Direction ---
-// دي الدالة السحرية اللي هتظبط الاتجاه في كل حتة في الصفحة
 const getFlexDirection = (language) => {
     const isAppRTL = language === 'ar';
     const isSystemRTL = I18nManager.isRTL;
-    // لو لغة التطبيق زي لغة الجهاز، خليها طبيعي (row)
-    // لو مختلفين (واحد عربي وواحد إنجليزي)، اعكس (row-reverse)
     return isAppRTL === isSystemRTL ? 'row' : 'row-reverse';
 };
 
@@ -49,6 +46,8 @@ const getTextAlign = (language) => {
     return language === 'ar' ? 'right' : 'left';
 };
 
+// --- Task Manager Definition (Global) ---
+// تم إضافة Try-Catch وتأمين الكود لمنع الانهيار
 TaskManager.defineTask(STEPS_NOTIFICATION_TASK, async () => {
     try {
         const settingsRaw = await AsyncStorage.getItem('reminderSettings');
@@ -73,17 +72,14 @@ TaskManager.defineTask(STEPS_NOTIFICATION_TASK, async () => {
         let currentSteps = 0;
 
         if (Platform.OS === 'android') {
-            const isConnected = await AsyncStorage.getItem('isGoogleFitConnected');
-            if (isConnected === 'true') {
-                const options = {
-                    scopes: [
-                        GoogleFit.Scopes.FITNESS_ACTIVITY_READ,
-                        GoogleFit.Scopes.FITNESS_BODY_READ,
-                    ],
-                };
-                const authResult = await GoogleFit.authorize(options);
-                
-                if (authResult.success) {
+            // لا تعتمد على authorize مباشرة لتجنب المشاكل في الخلفية
+            // افترض أن الصلاحيات ممنوحة مسبقاً
+            try {
+                // محاولة التحقق السريع (قد لا تعمل دائماً في الخلفية بدون Activity)
+                // لذلك نستخدم try catch عام
+                if (GoogleFit) {
+                    // Check if authorized already? (Hard to do in background without context sometimes)
+                    // We assume user authorized in foreground.
                     const now = new Date();
                     const opt = {
                         startDate: start.toISOString(),
@@ -94,13 +90,16 @@ TaskManager.defineTask(STEPS_NOTIFICATION_TASK, async () => {
                     const res = await GoogleFit.getDailyStepCountSamples(opt);
                     if (res && res.length > 0) {
                         res.forEach(source => {
-                            if (source.steps && source.steps.length > 0) {
-                                const val = source.steps[0].value;
-                                if (val > currentSteps) currentSteps = val;
+                             if (source.steps && source.steps.length > 0) {
+                                source.steps.forEach(step => {
+                                    if(step.value > currentSteps) currentSteps = step.value;
+                                });
                             }
                         });
                     }
                 }
+            } catch (gfError) {
+                console.log("GoogleFit bg error", gfError);
             }
         } else {
             const isAvailable = await Pedometer.isAvailableAsync();
@@ -195,7 +194,6 @@ const DateNavigator = ({ selectedDate, onDateSelect, referenceToday, theme, t, l
 
     const isNextDisabled = startDate.getTime() >= todayWeekStart.getTime();
 
-    // ✅ تحديث الاتجاه
     const flexDirection = getFlexDirection(language);
 
     return (
@@ -291,7 +289,6 @@ const SummaryCard = ({ data, dailyGoal, theme, t, language }) => {
     ); 
 };
 
-// ✅ تم تعديل الصفوف لتقلب الاتجاه حسب اللغة
 const NutrientRow = ({ label, consumed, goal, color, unit = 'جم', isLimit = false, theme, language }) => { 
     const isOverLimit = isLimit && consumed > goal; 
     const progressColor = isOverLimit ? theme.overLimit : color;
@@ -304,7 +301,6 @@ const NutrientRow = ({ label, consumed, goal, color, unit = 'جم', isLimit = fa
                 <Text style={styles.nutrientRowLabel(theme)}>{label}</Text>
                 <Text style={styles.nutrientRowValue(theme)}>{valueText}</Text>
             </View>
-            {/* في التقدم، لو اللغة عربي اعكس البار */}
             <View style={{ transform: [{ scaleX: language === 'ar' ? -1 : 1 }] }}>
                 <Progress.Bar 
                     progress={goal > 0 ? consumed / goal : 0} 
@@ -393,7 +389,6 @@ const DailyFoodLog = ({ items, onPress, theme, t, language }) => {
     ); 
 };
 
-// ✅ تعديل اتجاه قسم الوجبات
 const MealLoggingSection = ({ title, iconName, items, onAddPress, mealKey, isEditable, theme, t, language }) => { 
     const totalCalories = items.reduce((sum, item) => sum + (item.calories || 0), 0); 
     const totalMacros = items.reduce((totals, item) => { totals.p += item.p || 0; totals.c += item.c || 0; totals.f += item.f || 0; totals.fib += item.fib || 0; totals.sug += item.sug || 0; totals.sod += item.sod || 0; return totals; }, { p: 0, c: 0, f: 0, fib: 0, sug: 0, sod: 0 }); 
@@ -426,7 +421,6 @@ const MealLoggingSection = ({ title, iconName, items, onAddPress, mealKey, isEdi
 
 const AddFoodModal = ({ visible, onClose, onFoodSelect, mealKey, theme, t }) => { const [query, setQuery] = useState(''); const [results, setResults] = useState([]); const [loading, setLoading] = useState(false); const [fetchingDetailsId, setFetchingDetailsId] = useState(null); const mealTranslations = { breakfast: t('breakfast'), lunch: t('lunch'), dinner: t('dinner'), snacks: t('snacks') }; const mealTitle = mealTranslations[mealKey] || '...'; const handleClose = () => { setQuery(''); setResults([]); setLoading(false); setFetchingDetailsId(null); onClose(); }; const searchSpoonacular = async (searchQuery) => { try { const response = await fetch(`https://api.spoonacular.com/food/ingredients/search?query=${searchQuery}&number=15&apiKey=${SPOONACULAR_API_KEY}`); const data = await response.json(); return data.results ? data.results.map(item => ({ ...item, source: 'spoonacular' })) : []; } catch (error) { console.error("Spoonacular Search API Error:", error); return []; } }; const handleSearch = async () => { if (!query.trim()) { Alert.alert(t('error'), t('search_error_msg')); return; } setLoading(true); setResults([]); try { const [egyptianResults, spoonacularResults] = await Promise.all([searchEgyptianFoodsWithImages(query), searchSpoonacular(query)]); setResults([...egyptianResults, ...spoonacularResults]); } catch (error) { Alert.alert(t('error'), t('fetch_error_msg')); } finally { setLoading(false); } }; const handleSelectFood = async (selectedItem) => { if (selectedItem.source === 'local') { onFoodSelect(selectedItem); handleClose(); return; } setFetchingDetailsId(selectedItem.id); try { const response = await fetch(`https://api.spoonacular.com/food/ingredients/${selectedItem.id}/information?amount=100&unit=g&apiKey=${SPOONACULAR_API_KEY}`); const data = await response.json(); if (data.nutrition && data.nutrition.nutrients) { const nutrition = data.nutrition.nutrients; const finalFoodItem = { id: data.id, name: data.name, quantity: '100g', calories: Math.round(nutrition.find(n => n.name === 'Calories')?.amount || 0), p: Math.round(nutrition.find(n => n.name === 'Protein')?.amount || 0), c: Math.round(nutrition.find(n => n.name === 'Carbohydrates')?.amount || 0), f: Math.round(nutrition.find(n => n.name === 'Fat')?.amount || 0), fib: Math.round(nutrition.find(n => n.name === 'Fiber')?.amount || 0), sug: Math.round(nutrition.find(n => n.name === 'Sugar')?.amount || 0), sod: Math.round(nutrition.find(n => n.name === 'Sodium')?.amount || 0), image: selectedItem.image, }; onFoodSelect(finalFoodItem); handleClose(); } else { Alert.alert(t('error'), t('fetch_error_msg')); } } catch (error) { console.error("Spoonacular Details API Error:", error); Alert.alert(t('error'), t('fetch_error_msg')); } finally { setFetchingDetailsId(null); } }; return (<Modal visible={visible} onRequestClose={handleClose} animationType="slide" transparent={true}><View style={styles.modalOverlay}><View style={styles.modalView(theme)}><View style={styles.modalHeader(theme)}><Text style={styles.modalTitle(theme)}>{t('add_to')} {mealTitle}</Text><TouchableOpacity onPress={handleClose}><Ionicons name="close-circle" size={30} color={theme.primary} /></TouchableOpacity></View><View style={styles.searchContainer}><TextInput style={styles.searchInput(theme)} placeholder={t('search_placeholder')} value={query} onChangeText={setQuery} placeholderTextColor={theme.textSecondary} returnKeyType="search" onSubmitEditing={handleSearch} /><TouchableOpacity style={styles.searchButton(theme)} onPress={handleSearch}><Ionicons name="search" size={24} color={theme.white} /></TouchableOpacity></View>{loading ? (<ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 20 }} />) : (<FlatList data={results} keyExtractor={(item, index) => `${item.id}-${index}`} renderItem={({ item }) => (<TouchableOpacity style={styles.resultItem} onPress={() => handleSelectFood(item)} disabled={fetchingDetailsId !== null}><View style={{ flex: 1, alignItems: 'flex-start' }}><Text style={styles.foodName(theme)}>{item.name}</Text>{item.source === 'local' && <Text style={{color: theme.primary, fontSize: 12}}>{t('local_food')}</Text>}</View>{fetchingDetailsId === item.id ? (<ActivityIndicator size="small" color={theme.primary} style={{ marginStart: 15 }} />) : (<Ionicons name="add-circle-outline" size={28} color={theme.primary} style={{ marginStart: 15 }} />)}</TouchableOpacity>)} ListEmptyComponent={!loading && query.length > 0 ? <Text style={styles.emptyText(theme)}>{t('no_results')}</Text> : null} />)}</View></View></Modal>);};
 
-// ✅ تعديل الكروت الصغيرة
 const SmallWeightCard = ({ weight, onPress, theme, t, language }) => (
     <TouchableOpacity style={styles.smallCard(theme)} onPress={onPress}>
         <View style={[styles.smallCardHeader, { flexDirection: getFlexDirection(language) }]}>
@@ -480,10 +474,27 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
             const savedGoal = await AsyncStorage.getItem('stepsGoal');
             if (savedGoal) setGoal(parseInt(savedGoal, 10));
 
-            const connected = await AsyncStorage.getItem('isGoogleFitConnected');
-            setIsConnected(connected === 'true');
+            let isAuth = false;
+            if (Platform.OS === 'android') {
+                try {
+                    // Check directly with the native module
+                    await GoogleFit.checkIsAuthorized();
+                    if (GoogleFit.isAuthorized) {
+                         isAuth = true;
+                         // Force update local storage if mismatch
+                         await AsyncStorage.setItem('isGoogleFitConnected', 'true');
+                    }
+                } catch (e) {
+                    console.log("Check Auth Error:", e);
+                }
+            }
 
-            if (connected === 'true') {
+            // Fallback to storage if check fails or on other platforms
+            const storedStatus = await AsyncStorage.getItem('isGoogleFitConnected');
+            const finalStatus = isAuth || (storedStatus === 'true');
+            setIsConnected(finalStatus);
+
+            if (finalStatus && Platform.OS === 'android') {
                 const now = new Date();
                 const startOfDay = new Date();
                 startOfDay.setHours(0, 0, 0, 0);
@@ -501,10 +512,17 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                         let maxSteps = 0;
                         res.forEach(source => {
                             if (source.steps && source.steps.length > 0) {
-                                const val = source.steps[0].value;
-                                if (val > maxSteps) maxSteps = val;
+                                source.steps.forEach(step => {
+                                    if(step.value > maxSteps) maxSteps = step.value;
+                                });
                             }
                         });
+                        // Fallback logic if maxSteps is still 0 but we have data
+                        if (maxSteps === 0 && res.some(s => s.steps.length > 0)) {
+                             res.forEach(source => {
+                                 if(source.steps.length > 0) maxSteps += source.steps[0].value;
+                             });
+                        }
                         setSteps(maxSteps);
                     }
                 } catch (e) {
@@ -636,7 +654,6 @@ function DiaryScreen({ navigation, route, setHasProgress, theme, t, language }) 
     const totalExerciseCalories = (dailyData.exercises || []).reduce((sum, ex) => sum + (ex.calories || 0), 0); 
     useEffect(() => { const progressMade = calculatedTotals.food > 0 || totalExerciseCalories > 0; setHasProgress(progressMade); }, [calculatedTotals.food, totalExerciseCalories, setHasProgress]); 
     
-    // ✅ تطبيق الاتجاه الذكي على الكونتينرات الرئيسية
     const flexDirection = getFlexDirection(language);
     const textAlign = getTextAlign(language);
 
@@ -679,51 +696,22 @@ const MagicLineTabBar = ({ state, descriptors, navigation, theme, t, language })
     const TAB_WIDTH = Dimensions.get('window').width / TAB_COUNT;
     const [profileImage, setProfileImage] = useState(null);
 
-    // =========================================================
-    // 1. ترتيب الأيقونات
-    // =========================================================
-    
-    // ✅ الإنجليزي: (Diary) أول واحد عشان ييجي علي الشمال
     const orderEn = ['ProfileStack', 'Camera', 'ReportsStack', 'DiaryStack'];
-
-    // ✅ العربي: (Profile) أول واحد عشان ييجي علي الشمال، فـ (Diary) يروح أقصي اليمين
     const orderAr = ['DiaryStack', 'ReportsStack', 'Camera', 'ProfileStack']; 
-
-    // =========================================================
-    // 2. 🛠️ أرقام تظبيط مكان الدائرة (Offsets)
-    // =========================================================
-    // القائمة دي ماشية مع ترتيب الأيقونات اللي هيظهر علي الشاشة من الشمال لليمين
-    // [الأيقونة 1 (شمال), الأيقونة 2, الأيقونة 3, الأيقونة 4 (يمين)]
     
     const offsets = {
-        // أرقام تظبيط الإنجليزي (Diary علي الشمال)
-        // [Diary, Reports, Camera, Profile]
         en: [0, -180, -360, -540], 
-
-        // أرقام تظبيط العربي (Profile علي الشمال)
-        // [Profile, Camera, Reports, Diary]
         ar: [0, -180, -360, -540]  
     };
     
-    // ملاحظة: لو عايز تحرك الدائرة يمين اكتب رقم موجب (10)، لو شمال اكتب سالب (-10)
-
-    // =========================================================
-
-    // اختيار الترتيب المناسب حسب اللغة
     const currentOrderNames = language === 'ar' ? orderAr : orderEn;
     
-    // تكوين قائمة الـ Routes بالترتيب الجديد
     const orderedRoutes = currentOrderNames.map(name => 
         state.routes.find(r => r.name === name)
     ).filter(Boolean);
 
-    // معرفة التابة النشطة حالياً
     const currentActiveRouteName = state.routes[state.index].name;
-    
-    // معرفة رقم التابة النشطة في الترتيب المختار
     const activeIndex = currentOrderNames.indexOf(currentActiveRouteName);
-
-    // حساب مكان الدائرة + التعديل اليدوي
     const manualCorrection = language === 'ar' ? offsets.ar[activeIndex] : offsets.en[activeIndex];
     const finalTranslateX = (activeIndex * TAB_WIDTH) + (manualCorrection || 0);
 

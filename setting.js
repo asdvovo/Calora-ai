@@ -312,6 +312,8 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
         const loadSettings = async () => {
             const savedTheme = await AsyncStorage.getItem('isDarkMode');
             setIsDarkMode(savedTheme === 'true');
+            
+            // تحقق من الاتصال بـ Google Fit
             const isConnected = await AsyncStorage.getItem('isGoogleFitConnected') === 'true';
             setIsGoogleFitConnected(isConnected);
             
@@ -408,6 +410,8 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
   };
 
   const handleToggleStepsReminder = async () => {
+    // هذه الوظيفة تعتمد على TaskManager المعرف في MainUI
+    // يجب أن تكون المهمة معرفة هناك باسم 'steps-notification-task'
     const { status: notificationStatus } = await Notifications.requestPermissionsAsync();
     if (notificationStatus !== 'granted') {
         Alert.alert(t('notificationsPermissionTitle'), t('notificationsPermissionMessage'));
@@ -416,16 +420,24 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
     const newReminders = { ...reminders, stepsGoal: { enabled: !reminders.stepsGoal.enabled } };
     setReminders(newReminders);
     await AsyncStorage.setItem('reminderSettings', JSON.stringify(newReminders));
+    
     if (newReminders.stepsGoal.enabled) {
+        // نكتفي بتسجيل الإعدادات، والمهمة المسجلة في MainUI ستقرأها
+        // أو يمكن محاولة التسجيل هنا إذا كان مدعوماً
         try {
             if (TaskManager && TaskManager.registerTaskAsync) {
-                await TaskManager.registerTaskAsync('steps-notification-task', { minimumInterval: 15 * 60 });
+                // اسم المهمة يجب أن يطابق المعرف في MainUI
+                await TaskManager.registerTaskAsync('steps-notification-task', { 
+                    minimumInterval: 15 * 60,
+                    stopOnTerminate: false,
+                    startOnBoot: true,
+                });
             }
         } catch (e) {
-            console.log("Background task registration failed (Expected on incompatible devices), ignoring...");
+            console.log("Background task registration/unregistration handled centrally.");
         }
     } else {
-        try {
+         try {
             if (TaskManager && TaskManager.unregisterTaskAsync) {
                 await TaskManager.unregisterTaskAsync('steps-notification-task');
             }
@@ -505,39 +517,84 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
   };
   const copyToClipboard = () => { if (exportDataContent) { Clipboard.setString(exportDataContent); Alert.alert(t('copied')); } };
   const handleDeleteAccount = () => { Alert.alert(t('deleteAccountTitle'), t('deleteAccountMessage'), [{ text: t('cancel'), style: 'cancel' }, { text: t('delete'), style: 'destructive', onPress: () => console.log("Account deleted") }]); };
+  
+  // دالة الاتصال المحسنة بـ Google Fit
   const handleConnectGoogleFit = async () => {
+    if (Platform.OS !== 'android') {
+        Alert.alert(t('error'), "Google Fit is only supported on Android.");
+        return;
+    }
+
     setIsConnecting(true);
-    const options = { scopes: [ Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_BODY_READ, Scopes.FITNESS_NUTRITION_READ, ], };
+    const options = { 
+        scopes: [ 
+            Scopes.FITNESS_ACTIVITY_READ, 
+            Scopes.FITNESS_BODY_READ, 
+            Scopes.FITNESS_NUTRITION_READ, 
+        ], 
+    };
+    
     try {
+        // التحقق أولاً
+        await GoogleFit.checkIsAuthorized();
+        if(GoogleFit.isAuthorized) {
+             setIsGoogleFitConnected(true);
+             await AsyncStorage.setItem('isGoogleFitConnected', 'true');
+             Alert.alert('Google Fit', t('connectionSuccess'));
+             setIsConnecting(false);
+             return;
+        }
+
         const authResult = await GoogleFit.authorize(options);
-        if (authResult.success) { setIsGoogleFitConnected(true); await AsyncStorage.setItem('isGoogleFitConnected', 'true'); Alert.alert('Google Fit', t('connectionSuccess'));
-        } else { console.log("AUTH_DENIED", authResult.message); setIsGoogleFitConnected(false); await AsyncStorage.setItem('isGoogleFitConnected', 'false'); Alert.alert('Google Fit', t('connectionFailed')); }
-    } catch (error) { console.error("AUTH_ERROR", error); setIsGoogleFitConnected(false); await AsyncStorage.setItem('isGoogleFitConnected', 'false'); Alert.alert('Google Fit', t('connectionFailed')); } finally { setIsConnecting(false); }
+        if (authResult.success) { 
+            setIsGoogleFitConnected(true); 
+            await AsyncStorage.setItem('isGoogleFitConnected', 'true'); 
+            Alert.alert('Google Fit', t('connectionSuccess'));
+        } else { 
+            console.log("AUTH_DENIED", authResult.message); 
+            setIsGoogleFitConnected(false); 
+            await AsyncStorage.setItem('isGoogleFitConnected', 'false'); 
+            Alert.alert('Google Fit', t('connectionFailed') + "\n" + (authResult.message || "Unknown error")); 
+        }
+    } catch (error) { 
+        console.error("AUTH_ERROR", error); 
+        setIsGoogleFitConnected(false); 
+        await AsyncStorage.setItem('isGoogleFitConnected', 'false'); 
+        Alert.alert('Google Fit', t('connectionFailed')); 
+    } finally { 
+        setIsConnecting(false); 
+    }
   };
-  const handleDisconnectGoogleFit = async () => { try { await GoogleFit.disconnect(); setIsGoogleFitConnected(false); await AsyncStorage.setItem('isGoogleFitConnected', 'false'); Alert.alert("Google Fit", t('disconnectSuccess')); } catch (error) { console.error("DISCONNECT_ERROR", error); } };
+
+  const handleDisconnectGoogleFit = async () => { 
+      try { 
+          await GoogleFit.disconnect(); 
+          setIsGoogleFitConnected(false); 
+          await AsyncStorage.setItem('isGoogleFitConnected', 'false'); 
+          Alert.alert("Google Fit", t('disconnectSuccess')); 
+      } catch (error) { 
+          console.error("DISCONNECT_ERROR", error); 
+      } 
+  };
 
 const handleSaveLanguage = async () => {
     if (activeLanguage === selectedLanguage) { setCurrentView('main'); return; }
     try {
       
-      // 🔥🔥🔥 أولاً: نفصل جوجل فيت لو متوصل 🔥🔥🔥
       if (isGoogleFitConnected) {
           try {
               await GoogleFit.disconnect();
-              // تحديث الحالة محلياً عشان الذاكرة تبقى نظيفة قبل الريستارت
               setIsGoogleFitConnected(false); 
           } catch (err) {
               console.log("Disconnect error before reload:", err);
           }
       }
 
-      // ثانياً: نحفظ اللغة
       await AsyncStorage.setItem('appLanguage', selectedLanguage);
       
       const isAr = selectedLanguage === 'ar';
       setActiveLanguage(selectedLanguage);
 
-      // ثالثاً: نطبق الاتجاه
       I18nManager.allowRTL(isAr);
       I18nManager.forceRTL(isAr);
       
