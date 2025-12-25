@@ -2,13 +2,14 @@ import React, { useState, useEffect, useCallback, useLayoutEffect, useRef } from
 import { 
     StyleSheet, View, Text, ScrollView, SafeAreaView, TouchableOpacity, 
     ActivityIndicator, Modal, TextInput, StatusBar,
-    Platform, PermissionsAndroid, AppState, InteractionManager 
+    Platform, PermissionsAndroid, AppState, InteractionManager,
+    I18nManager,
+    DeviceEventEmitter 
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import GoogleFit, { Scopes } from 'react-native-google-fit'; 
-// تم إزالة Pedometer لتجنب التضارب
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, useAnimatedProps } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 
@@ -102,7 +103,8 @@ const StepsScreen = () => {
     const [isGoogleFitConnected, setIsGoogleFitConnected] = useState(false); 
     const [isPromptVisible, setPromptVisible] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState('week');
-    const [language, setLanguage] = useState('ar');
+    
+    const [language, setLanguage] = useState(I18nManager.isRTL ? 'ar' : 'en');
     const [selectedBarIndex, setSelectedBarIndex] = useState(null);
 
     const isRTL = language === 'ar'; 
@@ -119,8 +121,8 @@ const StepsScreen = () => {
         });
     }, [navigation, theme, language, isRTL]);
 
-    const fetchGoogleFitData = useCallback(async (shouldFetchHistory = true) => {
-        if (isFetchingRef.current) return;
+    const fetchGoogleFitData = useCallback(async (shouldFetchHistory = true, isLiveUpdate = false) => {
+        if (isFetchingRef.current && !isLiveUpdate) return;
         isFetchingRef.current = true;
 
         try {
@@ -129,33 +131,34 @@ const StepsScreen = () => {
                 setIsGoogleFitConnected(false); setLoading(false); isFetchingRef.current = false; return;
             }
 
-            const isAuth = await GoogleFit.checkIsAuthorized();
-            if (!isAuth) {
-                try { await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] }); } catch(e){}
+            if (!isLiveUpdate) {
+                const isAuth = await GoogleFit.checkIsAuthorized();
+                if (!isAuth) {
+                    try { await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] }); } catch(e){}
+                }
+                setIsGoogleFitConnected(true);
             }
-            setIsGoogleFitConnected(true);
             
-            // بدء التسجيل لو مش شغال، بس من غير استهلاك عالي
-            GoogleFit.startRecording((callback) => {}, ['step']);
-
             const now = new Date();
             const startOfDay = new Date();
             startOfDay.setHours(0,0,0,0);
             
-            // جلب خطوات اليوم فقط
             const todayOpts = { startDate: startOfDay.toISOString(), endDate: now.toISOString(), bucketUnit: 'DAY', bucketInterval: 1 };
             const todayRes = await GoogleFit.getDailyStepCountSamples(todayOpts);
             
             if (todayRes && todayRes.length > 0) {
                 let maxSteps = 0;
-                // تصفية البيانات عشان ناخد أدق رقم من Google Fit
                 todayRes.forEach(source => {
-                     // نتجاهل المصادر الخام اللي ممكن تكون قليلة، ونركز على الـ merged
                     if (source.steps && source.steps.length > 0) {
                         source.steps.forEach(step => { if (step.value > maxSteps) maxSteps = step.value; });
                     }
                 });
                 setDisplaySteps(maxSteps);
+            }
+
+            if (isLiveUpdate) {
+                isFetchingRef.current = false;
+                return;
             }
 
             if (shouldFetchHistory) {
@@ -168,7 +171,6 @@ const StepsScreen = () => {
                 const finalData = {}; 
                 if (historyRes) {
                     historyRes.forEach(source => {
-                        // فلترة المصادر عشان ناخد البيانات المدمجة النضيفة
                         if (source.source.includes('com.google.android.gms') || source.source.includes('user_input') || source.source.includes('merge')) {
                             source.steps.forEach(step => {
                                 if(step.date) {
@@ -189,37 +191,54 @@ const StepsScreen = () => {
         }
     }, []);
 
-    // --- بديل الـ Real-time ---
-    // بدل ما نفتح حساس، هنعمل تحديث كل 10 ثواني طول ما الشاشة مفتوحة
+    // --- التعديل هنا: حذفنا observeSteps المسببة للكراش واعتمدنا على Event Listener + تحديث سريع ---
     useFocusEffect(
         useCallback(() => {
             let isMounted = true;
-            let intervalId = null;
+            let stepListener = null;
+            let fastInterval = null;
 
             const init = async () => {
                 const savedTheme = await AsyncStorage.getItem('isDarkMode');
                 if (isMounted) setTheme(savedTheme === 'true' ? darkTheme : lightTheme);
                 
                 const savedLang = await AsyncStorage.getItem('appLanguage');
-                if (isMounted) setLanguage(savedLang || 'ar'); 
+                if (isMounted) setLanguage(savedLang || (I18nManager.isRTL ? 'ar' : 'en')); 
 
                 const savedGoal = await AsyncStorage.getItem('stepsGoal');
                 if (isMounted && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
 
                 InteractionManager.runAfterInteractions(() => {
                     if (isMounted) {
-                        fetchGoogleFitData(true);
-                        // تحديث الخطوات كل 10 ثواني
-                        intervalId = setInterval(() => {
-                            fetchGoogleFitData(false); // false يعني هات خطوات اليوم بس متجبش الهيستوري كله تاني
-                        }, 10000);
+                        fetchGoogleFitData(true, false);
+                        
+                        // 1. بدأ التسجيل (ضروري عشان العداد يشتغل)
+                        GoogleFit.startRecording((callback) => {
+                            // Recording started
+                        }, ['step']);
+
+                        // 2. محاولة الاستماع للحدث (لو الجهاز بيدعمها بدون observeSteps)
+                        try {
+                            stepListener = DeviceEventEmitter.addListener('StepChanged', (event) => {
+                                if (isMounted) fetchGoogleFitData(false, true);
+                            });
+                        } catch (e) { console.log("Listener Error", e); }
+
+                        // 3. الحل البديل الآمن: تحديث كل 1.5 ثانية (سريع جداً ومش بيعمل كراش)
+                        // ده هيضمن إن الرقم يزيد حتى لو الـ Event Listener مفعلش
+                        fastInterval = setInterval(() => {
+                            if (isMounted) fetchGoogleFitData(false, true);
+                        }, 1500); 
                     }
                 });
             };
             init();
+
             return () => { 
                 isMounted = false; 
-                if (intervalId) clearInterval(intervalId);
+                if (stepListener) stepListener.remove();
+                if (fastInterval) clearInterval(fastInterval); // وقف التحديث السريع لما تخرج
+                // مش هنوقف GoogleFit.unsubscribeListeners عشان الكراش
             };
         }, [fetchGoogleFitData]) 
     );
@@ -237,7 +256,7 @@ const StepsScreen = () => {
                 if (res.success) {
                     setIsGoogleFitConnected(true);
                     await AsyncStorage.setItem('isGoogleFitConnected', 'true');
-                    fetchGoogleFitData(true);
+                    fetchGoogleFitData(true, false);
                 }
             }
         } catch (error) { console.warn("Auth Error:", error); }

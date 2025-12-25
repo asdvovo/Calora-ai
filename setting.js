@@ -13,7 +13,7 @@ import GoogleFit, { Scopes } from 'react-native-google-fit';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Updates from 'expo-updates';
 
-// ✅ تم استرجاع الاستيراد كما كان
+// تأكد من وجود ملف البيانات هذا أو قم بتعليقه إذا لم يكن موجوداً
 import notificationsData from './notificationsdata'; 
 
 Notifications.setNotificationHandler({
@@ -355,7 +355,6 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
     }
 
     await Notifications.cancelAllScheduledNotificationsAsync();
-    // ✅ استخدام البيانات المستوردة هنا
     const data = notificationsData?.notifications?.[currentLang] || notificationsData?.notifications?.en;
     
     if (!data) return;
@@ -517,56 +516,52 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
   };
   const handleDisconnectGoogleFit = async () => { try { await GoogleFit.disconnect(); setIsGoogleFitConnected(false); await AsyncStorage.setItem('isGoogleFitConnected', 'false'); Alert.alert("Google Fit", t('disconnectSuccess')); } catch (error) { console.error("DISCONNECT_ERROR", error); } };
 
-  // ===============================================
-  // 🔥🔥🔥 الكود المصحح لتفادي الكراش 🔥🔥🔥
-  // ===============================================
-  const handleSaveLanguage = async () => {
+const handleSaveLanguage = async () => {
     if (activeLanguage === selectedLanguage) { setCurrentView('main'); return; }
     try {
-      // 1. حفظ الإعدادات في الذاكرة
-      await AsyncStorage.setItem('appLanguage', selectedLanguage);
-      const isAr = selectedLanguage === 'ar';
       
-      // 2. إعداد الاتجاه (لن يطبق بالكامل إلا بعد الريلود)
+      // 🔥🔥🔥 أولاً: نفصل جوجل فيت لو متوصل 🔥🔥🔥
+      if (isGoogleFitConnected) {
+          try {
+              await GoogleFit.disconnect();
+              // تحديث الحالة محلياً عشان الذاكرة تبقى نظيفة قبل الريستارت
+              setIsGoogleFitConnected(false); 
+          } catch (err) {
+              console.log("Disconnect error before reload:", err);
+          }
+      }
+
+      // ثانياً: نحفظ اللغة
+      await AsyncStorage.setItem('appLanguage', selectedLanguage);
+      
+      const isAr = selectedLanguage === 'ar';
+      setActiveLanguage(selectedLanguage);
+
+      // ثالثاً: نطبق الاتجاه
       I18nManager.allowRTL(isAr);
       I18nManager.forceRTL(isAr);
       
-      // 3. إظهار التنبيه ثم تنفيذ العملية الخطرة عند الضغط على موافق
       Alert.alert(
         t('languageSaved', selectedLanguage), 
         t('languageSettingsUpdated', selectedLanguage), 
         [ 
             { 
                 text: 'OK', 
-                onPress: async () => { 
-                    // أ: فصل جوجل فيت بشكل آمن
-                    if (isGoogleFitConnected) {
-                        try {
-                            console.log("Disconnecting Google Fit before reload...");
-                            await GoogleFit.disconnect();
-                        } catch (err) {
-                            console.log("Disconnect error (ignored):", err);
-                        }
-                    }
-
-                    // ب: مهلة ثانية واحدة للسماح للنظام بإغلاق الاتصال قبل الريلود
+                onPress: () => { 
                     setTimeout(async () => {
                         try {
                             await Updates.reloadAsync();
                         } catch(e) {
                            console.log("Reload error", e);
-                           Alert.alert("Note", "Please restart the app manually.");
+                           Alert.alert("Note", "Please close and reopen the app manually.");
                         }
-                    }, 1000); 
+                    }, 500); 
                 }, 
             }, 
         ], 
         { cancelable: false }
       );
-    } catch (e) { 
-        console.error("Failed to save language settings.", e); 
-        Alert.alert("Error", "Could not save language settings."); 
-    }
+    } catch (e) { console.error("Failed to save language settings.", e); Alert.alert("Error", "Could not save language settings."); }
   };
 
   const renderContent = () => {
@@ -634,17 +629,26 @@ const styles = StyleSheet.create({
   headerButton: { width: 50, height: 50, justifyContent: 'center', alignItems: 'center' },
   headerActionText: { fontSize: 16, fontWeight: '600', },
   scrollContent: { paddingBottom: 20 },
+  
   settingsItem: { alignItems: 'center', justifyContent: 'space-between', borderRadius: 10, padding: 12, marginHorizontal: 16, marginBottom: 10, elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2 },
+  
   iconContainer: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  
   label: { fontSize: 16 },
   description: { fontSize: 12, paddingTop: 2 },
+  
   sectionHeader: { fontSize: 13, fontWeight: '600', textTransform: 'uppercase', paddingHorizontal: 28, paddingVertical: 10, marginTop: 10 },
+  
   toggleContainer: { width: 52, height: 26, borderRadius: 13, padding: 2, justifyContent: 'center' },
   toggleThumb: { width: 20, height: 20, borderRadius: 10, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
+  
   exportDescription: { fontSize: 15, lineHeight: 22, marginBottom: 24, paddingHorizontal: 12 },
+  
   exportButton: { alignItems: 'center', justifyContent: 'center', paddingVertical: 15, borderRadius: 12, marginHorizontal: 16, },
   exportButtonText: { fontSize: 16, fontWeight: 'bold', },
+  
   dataBox: { marginTop: 20, padding: 10, height: 200, borderWidth: 1, borderRadius: 8, textAlignVertical: 'top', fontSize: 12 },
+  
   timeText: { fontSize: 16, fontWeight: '600', marginHorizontal: 10, },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   modalContent: { borderTopRightRadius: 20, borderTopLeftRadius: 20, padding: 20, position: 'absolute', bottom: 0, width: '100%' },
