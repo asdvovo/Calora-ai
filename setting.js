@@ -13,7 +13,7 @@ import GoogleFit, { Scopes } from 'react-native-google-fit';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Updates from 'expo-updates';
 
-// تأكد من وجود ملف البيانات هذا أو قم بتعليقه إذا لم يكن موجوداً
+// ✅ تم استرجاع الاستيراد كما كان
 import notificationsData from './notificationsdata'; 
 
 Notifications.setNotificationHandler({
@@ -158,33 +158,21 @@ const DarkModeToggle = ({ value, onValueChange }) => {
   );
 };
 
-// ====================================================================
-// ==================== تم تعديل المسافات هنا (marginHorizontal) =====
-// ====================================================================
-
 const SettingsActionItem = ({ icon, label, onPress, color, theme, isRTL }) => ( 
     <TouchableOpacity onPress={onPress} style={[styles.settingsItem, { 
         backgroundColor: theme.surface,
         flexDirection: getFlexDirection(isRTL), 
         alignItems: 'center',
     }]}>
-        
-        {/* الأيقونة */}
         <View style={[styles.iconContainer, { backgroundColor: theme.iconContainer }]}>
             <Icon name={icon} size={22} color={color || theme.iconColor} />
         </View>
-
-        {/* النص (تم تقليل المسافة من 16 إلى 10) */}
         <Text style={[styles.label, { 
             color: color || theme.text,
             textAlign: isRTL ? 'right' : 'left',
-            marginHorizontal: 10  // <<--- تم التعديل هنا لتقريب النص
+            marginHorizontal: 10
         }]}>{label}</Text>
-
-        {/* فاصل مرن يدفع السهم للنهاية */}
         <View style={{ flex: 1 }} />
-
-        {/* السهم */}
         <Icon name={isRTL ? "chevron-left" : "chevron-right"} size={24} color="#B0B0B0" />
     </TouchableOpacity> 
 );
@@ -195,13 +183,9 @@ const SettingsToggleItem = ({ icon, label, description, value, onValueChange, th
       flexDirection: getFlexDirection(isRTL),
       alignItems: 'center',
   }]}>
-    
-    {/* الأيقونة */}
     <View style={[styles.iconContainer, { backgroundColor: theme.iconContainer }]}>
       <Icon name={icon} size={22} color={theme.iconColor} />
     </View>
-
-    {/* النص (تم تقليل المسافة من 16 إلى 10) */}
     <View style={{ marginHorizontal: 10 }}> 
       <Text style={[styles.label, { 
           color: theme.text,
@@ -212,11 +196,7 @@ const SettingsToggleItem = ({ icon, label, description, value, onValueChange, th
           textAlign: isRTL ? 'right' : 'left'
       }]}>{description}</Text>}
     </View>
-
-    {/* هذا الفاصل السحري: يدفع كل ما بعده إلى أقصى الطرف الآخر */}
     <View style={{ flex: 1 }} />
-
-    {/* زرار الـ Switch والوقت */}
     <View style={{ flexDirection: getFlexDirection(isRTL), alignItems: 'center' }}>
         {time && value && (
         <TouchableOpacity onPress={onTimePress}>
@@ -234,23 +214,15 @@ const SettingsIntegrationItem = ({ icon, label, isConnected, onConnect, onDiscon
       flexDirection: getFlexDirection(isRTL),
       alignItems: 'center',
   }]}>
-    
-    {/* الأيقونة */}
     <View style={[styles.iconContainer, { backgroundColor: theme.iconContainer }]}>
         <Icon name={icon} size={22} color={theme.iconColor} />
     </View>
-
-    {/* النص (تم تقليل المسافة من 16 إلى 10) */}
     <Text style={[styles.label, { 
         color: theme.text, 
         textAlign: isRTL ? 'right' : 'left',
-        marginHorizontal: 10 // <<--- تم التعديل هنا لتقريب النص
+        marginHorizontal: 10
     }]}>{label}</Text>
-
-    {/* فاصل مرن */}
     <View style={{ flex: 1 }} />
-
-    {/* أزرار الاتصال */}
     {isLoading ? (
       <ActivityIndicator color={theme.primary} />
     ) : isConnected ? (
@@ -267,8 +239,6 @@ const SettingsIntegrationItem = ({ icon, label, isConnected, onConnect, onDiscon
     )}
   </View>
 );
-
-// ====================================================================
 
 const LanguageSelectionItem = ({ label, isSelected, onPress, theme }) => ( 
     <TouchableOpacity onPress={onPress} style={[styles.settingsItem, { 
@@ -385,6 +355,7 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
     }
 
     await Notifications.cancelAllScheduledNotificationsAsync();
+    // ✅ استخدام البيانات المستوردة هنا
     const data = notificationsData?.notifications?.[currentLang] || notificationsData?.notifications?.en;
     
     if (!data) return;
@@ -546,50 +517,56 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
   };
   const handleDisconnectGoogleFit = async () => { try { await GoogleFit.disconnect(); setIsGoogleFitConnected(false); await AsyncStorage.setItem('isGoogleFitConnected', 'false'); Alert.alert("Google Fit", t('disconnectSuccess')); } catch (error) { console.error("DISCONNECT_ERROR", error); } };
 
-const handleSaveLanguage = async () => {
+  // ===============================================
+  // 🔥🔥🔥 الكود المصحح لتفادي الكراش 🔥🔥🔥
+  // ===============================================
+  const handleSaveLanguage = async () => {
     if (activeLanguage === selectedLanguage) { setCurrentView('main'); return; }
     try {
+      // 1. حفظ الإعدادات في الذاكرة
       await AsyncStorage.setItem('appLanguage', selectedLanguage);
       const isAr = selectedLanguage === 'ar';
       
-      // 🔥🔥🔥 التعديل هنا: افصل جوجل فيت مؤقتاً عشان ميعملش كراش أثناء الريستارت 🔥🔥🔥
-      if (isGoogleFitConnected) {
-          try {
-              await GoogleFit.disconnect();
-              // ملحوظة: احنا هنا مش بنغير قيمة 'isGoogleFitConnected' في الـ Storage
-              // عشان لما التطبيق يفتح تاني يرجع يتصل لوحده
-          } catch (err) {
-              console.log("Disconnect error before reload:", err);
-          }
-      }
-
-      setActiveLanguage(selectedLanguage);
-
-      I18nManager.allowRTL(true);
+      // 2. إعداد الاتجاه (لن يطبق بالكامل إلا بعد الريلود)
+      I18nManager.allowRTL(isAr);
       I18nManager.forceRTL(isAr);
       
+      // 3. إظهار التنبيه ثم تنفيذ العملية الخطرة عند الضغط على موافق
       Alert.alert(
         t('languageSaved', selectedLanguage), 
         t('languageSettingsUpdated', selectedLanguage), 
         [ 
             { 
                 text: 'OK', 
-                onPress: () => { 
+                onPress: async () => { 
+                    // أ: فصل جوجل فيت بشكل آمن
+                    if (isGoogleFitConnected) {
+                        try {
+                            console.log("Disconnecting Google Fit before reload...");
+                            await GoogleFit.disconnect();
+                        } catch (err) {
+                            console.log("Disconnect error (ignored):", err);
+                        }
+                    }
+
+                    // ب: مهلة ثانية واحدة للسماح للنظام بإغلاق الاتصال قبل الريلود
                     setTimeout(async () => {
                         try {
                             await Updates.reloadAsync();
                         } catch(e) {
                            console.log("Reload error", e);
-                           // حل بديل لو الريلود العادي فشل
-                           Alert.alert("Note", "Please close and reopen the app manually.");
+                           Alert.alert("Note", "Please restart the app manually.");
                         }
-                    }, 500); // قللت الوقت شوية عشان يلحق ينفذ قبل ما المستخدم يزهق
+                    }, 1000); 
                 }, 
             }, 
         ], 
         { cancelable: false }
       );
-    } catch (e) { console.error("Failed to save language settings.", e); Alert.alert("Error", "Could not save language settings."); }
+    } catch (e) { 
+        console.error("Failed to save language settings.", e); 
+        Alert.alert("Error", "Could not save language settings."); 
+    }
   };
 
   const renderContent = () => {
@@ -657,26 +634,17 @@ const styles = StyleSheet.create({
   headerButton: { width: 50, height: 50, justifyContent: 'center', alignItems: 'center' },
   headerActionText: { fontSize: 16, fontWeight: '600', },
   scrollContent: { paddingBottom: 20 },
-  
   settingsItem: { alignItems: 'center', justifyContent: 'space-between', borderRadius: 10, padding: 12, marginHorizontal: 16, marginBottom: 10, elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2 },
-  
   iconContainer: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  
   label: { fontSize: 16 },
   description: { fontSize: 12, paddingTop: 2 },
-  
   sectionHeader: { fontSize: 13, fontWeight: '600', textTransform: 'uppercase', paddingHorizontal: 28, paddingVertical: 10, marginTop: 10 },
-  
   toggleContainer: { width: 52, height: 26, borderRadius: 13, padding: 2, justifyContent: 'center' },
   toggleThumb: { width: 20, height: 20, borderRadius: 10, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
-  
   exportDescription: { fontSize: 15, lineHeight: 22, marginBottom: 24, paddingHorizontal: 12 },
-  
   exportButton: { alignItems: 'center', justifyContent: 'center', paddingVertical: 15, borderRadius: 12, marginHorizontal: 16, },
   exportButtonText: { fontSize: 16, fontWeight: 'bold', },
-  
   dataBox: { marginTop: 20, padding: 10, height: 200, borderWidth: 1, borderRadius: 8, textAlignVertical: 'top', fontSize: 12 },
-  
   timeText: { fontSize: 16, fontWeight: '600', marginHorizontal: 10, },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   modalContent: { borderTopRightRadius: 20, borderTopLeftRadius: 20, padding: 20, position: 'absolute', bottom: 0, width: '100%' },

@@ -8,7 +8,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import GoogleFit, { Scopes } from 'react-native-google-fit'; 
-import { Pedometer } from 'expo-sensors'; 
+// تم إزالة Pedometer لتجنب التضارب
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, useAnimatedProps } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 
@@ -94,12 +94,7 @@ const StepsScreen = () => {
     const isFetchingRef = useRef(false);
     
     const [theme, setTheme] = useState(lightTheme);
-    
-    const initialSensorStepsRef = useRef(null); 
-    const googleFitBaseRef = useRef(0);         
-    
     const [displaySteps, setDisplaySteps] = useState(0); 
-
     const [stepsGoal, setStepsGoal] = useState(10000);
     const [historicalData, setHistoricalData] = useState([]);
     const [rawStepsData, setRawStepsData] = useState({}); 
@@ -107,15 +102,9 @@ const StepsScreen = () => {
     const [isGoogleFitConnected, setIsGoogleFitConnected] = useState(false); 
     const [isPromptVisible, setPromptVisible] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState('week');
-    
-    // ---------------------- التعديل الأول ----------------------
-    // تغيير اللغة الافتراضية إلى 'ar' (عربي)
     const [language, setLanguage] = useState('ar');
-    
     const [selectedBarIndex, setSelectedBarIndex] = useState(null);
 
-    // ---------------------- التعديل الثاني ----------------------
-    // تصحيح منطق الـ RTL (من اليمين لليسار يكون true إذا كانت اللغة عربي)
     const isRTL = language === 'ar'; 
     const t = (key) => translations[language]?.[key] || translations['en'][key] || key;
 
@@ -125,8 +114,6 @@ const StepsScreen = () => {
             headerTitleAlign: 'center',
             headerStyle: { backgroundColor: theme.card, shadowColor: 'transparent', elevation: 0 },
             headerTintColor: theme.textPrimary,
-            // ---------------------- التعديل الثالث ----------------------
-            // عكس أماكن أزرار الرجوع بناءً على اللغة بشكل صحيح
             headerLeft: isRTL ? () => <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginHorizontal: 15 }}><Ionicons name="arrow-forward" size={24} color={theme.textPrimary} /></TouchableOpacity> : null,
             headerRight: !isRTL ? () => <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginHorizontal: 15 }}><Ionicons name="arrow-back" size={24} color={theme.textPrimary} /></TouchableOpacity> : null,
         });
@@ -147,95 +134,72 @@ const StepsScreen = () => {
                 try { await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] }); } catch(e){}
             }
             setIsGoogleFitConnected(true);
+            
+            // بدء التسجيل لو مش شغال، بس من غير استهلاك عالي
             GoogleFit.startRecording((callback) => {}, ['step']);
 
             const now = new Date();
             const startOfDay = new Date();
             startOfDay.setHours(0,0,0,0);
-            const todayOpts = { startDate: startOfDay.toISOString(), endDate: now.toISOString() };
+            
+            // جلب خطوات اليوم فقط
+            const todayOpts = { startDate: startOfDay.toISOString(), endDate: now.toISOString(), bucketUnit: 'DAY', bucketInterval: 1 };
             const todayRes = await GoogleFit.getDailyStepCountSamples(todayOpts);
             
             if (todayRes && todayRes.length > 0) {
                 let maxSteps = 0;
+                // تصفية البيانات عشان ناخد أدق رقم من Google Fit
                 todayRes.forEach(source => {
+                     // نتجاهل المصادر الخام اللي ممكن تكون قليلة، ونركز على الـ merged
                     if (source.steps && source.steps.length > 0) {
                         source.steps.forEach(step => { if (step.value > maxSteps) maxSteps = step.value; });
                     }
                 });
-                if (maxSteps > 0) {
-                    googleFitBaseRef.current = maxSteps; 
-                    if (initialSensorStepsRef.current === null) {
-                         setDisplaySteps(maxSteps);
-                    }
-                }
+                setDisplaySteps(maxSteps);
             }
 
             if (shouldFetchHistory) {
-                try {
-                    const daysToFetch = 30; 
-                    const historyStart = new Date();
-                    historyStart.setDate(historyStart.getDate() - daysToFetch);
-                    historyStart.setHours(0,0,0,0);
-                    const historyOpts = { startDate: historyStart.toISOString(), endDate: new Date().toISOString(), bucketUnit: 'DAY', bucketInterval: 1 };
-                    const historyRes = await GoogleFit.getDailyStepCountSamples(historyOpts);
-                    const finalData = {}; 
-                    if (historyRes) {
-                        historyRes.forEach(source => {
-                            if (source.source.includes('com.google.android.gms') || source.source.includes('user_input') || source.source.includes('estimated')) {
-                                source.steps.forEach(step => {
-                                    if(step.date) {
-                                        const dateStr = step.date.slice(0, 10);
-                                        if (!finalData[dateStr] || step.value > finalData[dateStr]) finalData[dateStr] = step.value;
-                                    }
-                                });
-                            }
-                        });
-                    }
-                    setRawStepsData(finalData);
-                } catch (e) { }
+                const daysToFetch = 30; 
+                const historyStart = new Date();
+                historyStart.setDate(historyStart.getDate() - daysToFetch);
+                historyStart.setHours(0,0,0,0);
+                const historyOpts = { startDate: historyStart.toISOString(), endDate: new Date().toISOString(), bucketUnit: 'DAY', bucketInterval: 1 };
+                const historyRes = await GoogleFit.getDailyStepCountSamples(historyOpts);
+                const finalData = {}; 
+                if (historyRes) {
+                    historyRes.forEach(source => {
+                        // فلترة المصادر عشان ناخد البيانات المدمجة النضيفة
+                        if (source.source.includes('com.google.android.gms') || source.source.includes('user_input') || source.source.includes('merge')) {
+                            source.steps.forEach(step => {
+                                if(step.date) {
+                                    const dateStr = step.date.slice(0, 10);
+                                    if (!finalData[dateStr] || step.value > finalData[dateStr]) finalData[dateStr] = step.value;
+                                }
+                            });
+                        }
+                    });
+                }
+                setRawStepsData(finalData);
             }
         } catch (globalError) {
-            console.log(globalError);
+            console.log("Error fetching fit data:", globalError);
         } finally {
             setLoading(false);
             isFetchingRef.current = false;
         }
     }, []);
 
-    useEffect(() => {
-        let subscription;
-        const startPedometer = async () => {
-            const isAvailable = await Pedometer.isAvailableAsync();
-            if (isAvailable) {
-                const perm = await Pedometer.requestPermissionsAsync();
-                if (perm.granted) {
-                    subscription = Pedometer.watchStepCount(result => {
-                        if (initialSensorStepsRef.current === null) {
-                            initialSensorStepsRef.current = result.steps;
-                        }
-                        const liveStepsDelta = result.steps - initialSensorStepsRef.current;
-                        const totalSteps = googleFitBaseRef.current + liveStepsDelta;
-                        setDisplaySteps(totalSteps);
-                    });
-                }
-            }
-        };
-
-        startPedometer();
-        return () => {
-            if (subscription) subscription.remove();
-            initialSensorStepsRef.current = null;
-        };
-    }, []);
-
+    // --- بديل الـ Real-time ---
+    // بدل ما نفتح حساس، هنعمل تحديث كل 10 ثواني طول ما الشاشة مفتوحة
     useFocusEffect(
         useCallback(() => {
             let isMounted = true;
+            let intervalId = null;
+
             const init = async () => {
                 const savedTheme = await AsyncStorage.getItem('isDarkMode');
                 if (isMounted) setTheme(savedTheme === 'true' ? darkTheme : lightTheme);
                 
-                // هنا بنحاول نجيب اللغة المحفوظة، لو مفيش بنخليها 'ar'
                 const savedLang = await AsyncStorage.getItem('appLanguage');
                 if (isMounted) setLanguage(savedLang || 'ar'); 
 
@@ -245,11 +209,18 @@ const StepsScreen = () => {
                 InteractionManager.runAfterInteractions(() => {
                     if (isMounted) {
                         fetchGoogleFitData(true);
+                        // تحديث الخطوات كل 10 ثواني
+                        intervalId = setInterval(() => {
+                            fetchGoogleFitData(false); // false يعني هات خطوات اليوم بس متجبش الهيستوري كله تاني
+                        }, 10000);
                     }
                 });
             };
             init();
-            return () => { isMounted = false; };
+            return () => { 
+                isMounted = false; 
+                if (intervalId) clearInterval(intervalId);
+            };
         }, [fetchGoogleFitData]) 
     );
     
@@ -284,8 +255,6 @@ const StepsScreen = () => {
                 startOfWeek.setHours(0, 0, 0, 0);
 
                 const enDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                // ---------------------- التعديل الرابع ----------------------
-                // تحسين أسماء الأيام العربية
                 const arDays = ['السبت', 'الجمعه', 'الخميس', 'الاربعاء', 'الثلاثاء', 'الاتنين', 'الاحد'];
                 
                 for (let i = 0; i < 7; i++) {
@@ -294,9 +263,7 @@ const StepsScreen = () => {
                     const offset = d.getTimezoneOffset() * 60000;
                     const dateKey = new Date(d.getTime() - offset).toISOString().split('T')[0];
                     
-                    // هنا بيختار المصفوفة بناءً على اللغة اللي ظبطناها فوق
                     let dayName = language === 'ar' ? arDays[d.getDay()] : enDays[d.getDay()];
-                    
                     weekData.push({ day: dayName, steps: rawStepsData[dateKey] || 0 });
                 }
                 setHistoricalData(weekData);
