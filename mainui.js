@@ -109,12 +109,14 @@ const translations = {
         weekdays: ['س', 'ح', 'ن', 'ث', 'ر', 'خ', 'ج'],
         p_macro: 'ب: ', c_macro: 'ك: ', f_macro: 'د: ', fib_macro: 'أ: ', sug_macro: 'س: ', sod_macro: 'ص: ',
         editProfile: 'تعديل الملف الشخصي', settings: 'الإعدادات', about: 'حول التطبيق',
+        not_connected: 'غير متصل',
     },
     en: {
         remainingCalories: 'Calories Remaining', readOnlyBanner: "You are viewing a past day. The log is read-only.", mealSectionsTitle: 'Meal Sections', mealSectionsDesc: 'This is the detailed log for the day.', breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snacks: 'Snacks', add_to_meal: '+ Add to {meal}', protein: 'Protein', carbs: 'Carbs', fat: 'Fat', fiber: 'Fiber', sugar: 'Sugar', sodium: 'Sodium', g_unit: 'g', mg_unit: 'mg', kcal_unit: 'kcal', weight: 'Weight', water: 'Water', workouts: 'Workouts', steps: 'Steps', not_logged: 'Not connected', unsupported: 'Unsupported', kg_unit: 'kg', burned_cal: 'calories', goal: 'Goal: ', dailyLogTitle: "Today's Food Log", add_to: 'Add to', search_placeholder: 'Search for koshari, molokhia, apple...', no_results: 'No search results found.', local_food: 'Local Food 🇪🇬', error: 'Error', search_error_msg: 'Please enter a food name to search.', fetch_error_msg: 'An error occurred while fetching food details.', save_error_msg: 'An error occurred while saving data.', diaryTab: 'Diary', reportsTab: 'Reports', cameraTab: 'Camera', profileTab: 'Profile', weightTrackerTitle: 'Weight Tracker', waterTrackerTitle: 'Water Tracker', workoutLogTitle: 'Workout Log', stepsReportTitle: 'Steps Report', foodLogDetailTitle: 'Food Log Details', 
         weekdays: ['S', 'M', 'T', 'W', 'T', 'F', 'S'],
         p_macro: 'P: ', c_macro: 'C: ', f_macro: 'F: ', fib_macro: 'Fib: ', sug_macro: 'Sug: ', sod_macro: 'Sod: ',
         editProfile: 'Edit Profile', settings: 'Settings', about: 'About',
+        not_connected: 'Not Connected',
     }
 };
 
@@ -430,63 +432,103 @@ const SmallWorkoutCard = ({ totalCaloriesBurned = 0, onPress, theme, t, language
     ); 
 };
 
-// --- START: تم تعديل كارد الخطوات بالكامل هنا ---
+// --- START: كارت الخطوات (حالة "غير متصل" صريحة + تحديث لايف) ---
 const SmallStepsCard = ({ navigation, theme, t, language }) => { 
-    const [status, setStatus] = useState('checking');
+    const [status, setStatus] = useState('checking'); // 'checking' | 'connected' | 'disconnected'
     const [currentStepCount, setCurrentStepCount] = useState(0);
     const [stepsGoal, setStepsGoal] = useState(10000);
 
     useFocusEffect(useCallback(() => {
-        const subscribe = async () => {
-            // جلب الهدف
-            const savedGoal = await AsyncStorage.getItem('stepsGoal');
-            if (savedGoal) setStepsGoal(parseInt(savedGoal, 10));
+        let isActive = true;
+        let intervalId = null;
 
-            // التحقق من التوفر
-            const isAvailable = await Pedometer.isAvailableAsync();
-            if (!isAvailable) {
-                setStatus('unavailable');
-                return;
-            }
-
-            // طلب الصلاحيات
-            const { status: permissionStatus } = await Pedometer.requestPermissionsAsync();
-            if (permissionStatus !== 'granted') {
-                setStatus('denied');
-                return;
-            }
-
-            // جلب الخطوات
-            const end = new Date();
-            const start = new Date();
-            start.setHours(0, 0, 0, 0);
-
+        const syncData = async () => {
             try {
-                const result = await Pedometer.getStepCountAsync(start, end);
-                if (result) setCurrentStepCount(result.steps);
-                setStatus('available');
+                // 1. جلب الهدف
+                const savedGoal = await AsyncStorage.getItem('stepsGoal');
+                if (isActive && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
+
+                // 2. التأكد هل المستخدم عمل "ربط" في صفحة الخطوات؟
+                const isConnectedVar = await AsyncStorage.getItem('isGoogleFitConnected');
+
+                // لو مش عامل ربط، اعتبره "غير متصل" فوراً
+                if (isConnectedVar !== 'true') {
+                    if (isActive) setStatus('disconnected');
+                    return;
+                }
+
+                // 3. لو عامل ربط، هات الداتا من جوجل فيت
+                const isAuthorized = await GoogleFit.checkIsAuthorized();
+                if (isAuthorized) {
+                    // الحالة: متصل
+                    if (isActive) setStatus('connected');
+
+                    const now = new Date();
+                    const startOfDay = new Date();
+                    startOfDay.setHours(0, 0, 0, 0);
+
+                    const opt = {
+                        startDate: startOfDay.toISOString(),
+                        endDate: now.toISOString(),
+                        bucketUnit: 'DAY',
+                        bucketInterval: 1
+                    };
+
+                    const res = await GoogleFit.getDailyStepCountSamples(opt);
+                    
+                    if (isActive && res && res.length > 0) {
+                        let maxSteps = 0;
+                        res.forEach(source => {
+                            if (source.steps) {
+                                source.steps.forEach(step => { 
+                                    if (step.value > maxSteps) maxSteps = step.value; 
+                                });
+                            }
+                        });
+                        setCurrentStepCount(maxSteps);
+                    }
+                } else {
+                    // لو الصلاحية راحت
+                    if (isActive) setStatus('disconnected');
+                }
+
             } catch (error) {
-                console.error("Pedometer error:", error);
-                // حتى في حالة الخطأ بنعتبره متاح عشان نعرض 0 بدل ما نخفي الدائرة
-                setStatus('available'); 
+                console.error("Steps sync error:", error);
             }
         };
 
-        subscribe();
+        // استدعاء فوري أول ما الصفحة تظهر
+        syncData();
+
+        // تكرار كل 3 ثواني عشان التحديث يبقى لايف
+        intervalId = setInterval(syncData, 3000);
+
+        return () => { 
+            isActive = false; 
+            if (intervalId) clearInterval(intervalId);
+        };
     }, []));
 
+    const progress = stepsGoal > 0 ? currentStepCount / stepsGoal : 0;
+
+    // دالة لعرض المحتوى بناءً على الحالة
     const renderContent = () => {
-        if (status === 'checking') return <ActivityIndicator style={{ marginTop: 20 }} color={theme.primary} />;
-        if (status === 'unavailable' || status === 'denied') {
+        if (status === 'checking') {
+            return <ActivityIndicator size="small" color={theme.primary} style={{ marginTop: 20 }} />;
+        }
+
+        if (status === 'disconnected') {
             return (
-                <Text style={[styles.smallCardValue(theme), { fontSize: 16, marginTop: 15, textAlign: 'center' }]}>
-                    {t('unsupported')}
-                </Text>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <MaterialCommunityIcons name="google-fit" size={32} color={theme.disabled} style={{ marginBottom: 5 }} />
+                    <Text style={[styles.smallCardValue(theme), { fontSize: 16, color: theme.textSecondary }]}>
+                        {t('not_connected')}
+                    </Text>
+                </View>
             );
         }
 
-        const progress = stepsGoal > 0 ? currentStepCount / stepsGoal : 0;
-
+        // لو متصل (status === 'connected') اعرض الدائرة والأرقام
         return (
             <View style={styles.stepsCardContent}>
                 <View style={styles.stepsCardCircleContainer}>
@@ -498,6 +540,7 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                         unfilledColor={theme.progressUnfilled} 
                         borderWidth={0} 
                         thickness={8} 
+                        strokeCap="round"
                     />
                     <View style={styles.stepsCardTextContainer}>
                         <Text style={styles.stepsCardCountText(theme)} numberOfLines={1}>
@@ -516,7 +559,11 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
         <TouchableOpacity style={styles.smallCard(theme)} onPress={() => navigation.navigate('Steps')}>
             <View style={[styles.smallCardHeader, { flexDirection: getFlexDirection(language) }]}>
                 <View style={[styles.smallCardIconContainer(theme)]}>
-                    <MaterialCommunityIcons name="walk" size={20} color={theme.primary} />
+                    <MaterialCommunityIcons 
+                        name={status === 'connected' ? "google-fit" : "walk"} 
+                        size={20} 
+                        color={theme.primary} 
+                    />
                 </View>
                 <Text style={[styles.smallCardTitle(theme), { marginStart: 8 }]}>{t('steps')}</Text>
             </View>
@@ -524,7 +571,7 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
         </TouchableOpacity>
     ); 
 };
-// --- END: نهاية تعديل كارد الخطوات ---
+// --- END ---
 
 const DashboardGrid = ({ weight, water, waterGoal, totalExerciseCalories, onWeightPress, onWaterPress, onWorkoutPress, navigation, theme, t, language }) => (
     <View style={[styles.dashboardGridContainer, { flexDirection: getFlexDirection(language) }]}>
