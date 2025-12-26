@@ -279,7 +279,7 @@ const StepsScreen = () => {
                     d.setDate(startOfWeek.getDate() + i);
                     const offset = d.getTimezoneOffset() * 60000;
                     const dateKey = new Date(d.getTime() - offset).toISOString().split('T')[0];
-                    
+                     
                     let dayName = language === 'ar' ? arDays[d.getDay()] : enDays[d.getDay()];
                     weekData.push({ day: dayName, steps: rawStepsData[dateKey] || 0 });
                 }
