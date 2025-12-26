@@ -448,20 +448,22 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                 const savedGoal = await AsyncStorage.getItem('stepsGoal');
                 if (isActive && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
 
-                // 2. التأكد هل المستخدم عمل "ربط" في صفحة الخطوات؟
-                const isConnectedVar = await AsyncStorage.getItem('isGoogleFitConnected');
-
-                // لو مش عامل ربط، اعتبره "غير متصل" فوراً
-                if (isConnectedVar !== 'true') {
+                // --- نقطة الأمان (مهم جداً لمنع الخطأ الذي ظهر لك) ---
+                if (!GoogleFit) {
+                    // إذا كانت المكتبة غير محملة، نوقف التنفيذ بهدوء بدلاً من الانهيار
                     if (isActive) setStatus('disconnected');
-                    return;
+                    return; 
                 }
+                // ---------------------------------------------------
 
-                // 3. لو عامل ربط، هات الداتا من جوجل فيت
+                // 2. التحقق من الصلاحية والاتصال
                 const isAuthorized = await GoogleFit.checkIsAuthorized();
+
                 if (isAuthorized) {
-                    // الحالة: متصل
                     if (isActive) setStatus('connected');
+                    
+                    // حفظ حالة الاتصال
+                    await AsyncStorage.setItem('isGoogleFitConnected', 'true');
 
                     const now = new Date();
                     const startOfDay = new Date();
@@ -477,31 +479,38 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                     const res = await GoogleFit.getDailyStepCountSamples(opt);
                     
                     if (isActive && res && res.length > 0) {
-                        let maxSteps = 0;
-                        res.forEach(source => {
-                            if (source.steps) {
-                                source.steps.forEach(step => { 
-                                    if (step.value > maxSteps) maxSteps = step.value; 
-                                });
-                            }
-                        });
-                        setCurrentStepCount(maxSteps);
+                        // محاولة جلب الخطوات المقدرة (Estimated) لدقة أعلى
+                        const estimatedSource = res.find(source => source.source === "com.google.android.gms:estimated_steps");
+                        let finalSteps = 0;
+
+                        if (estimatedSource && estimatedSource.steps.length > 0) {
+                            finalSteps = estimatedSource.steps[0].value;
+                        } else {
+                            // بديل: البحث عن أكبر قيمة
+                            res.forEach(source => {
+                                if (source.steps) {
+                                    source.steps.forEach(step => { 
+                                        if (step.value > finalSteps) finalSteps = step.value; 
+                                    });
+                                }
+                            });
+                        }
+                        setCurrentStepCount(finalSteps);
                     }
                 } else {
-                    // لو الصلاحية راحت
+                    // إذا لم يكن مصرحاً له
                     if (isActive) setStatus('disconnected');
                 }
 
             } catch (error) {
-                console.error("Steps sync error:", error);
+                console.log("Steps sync safely handled:", error);
+                if (isActive) setStatus('disconnected');
             }
         };
 
-        // استدعاء فوري أول ما الصفحة تظهر
         syncData();
-
-        // تكرار كل 3 ثواني عشان التحديث يبقى لايف
-        intervalId = setInterval(syncData, 3000);
+        // تحديث كل 5 ثواني
+        intervalId = setInterval(syncData, 5000);
 
         return () => { 
             isActive = false; 
@@ -509,14 +518,16 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
         };
     }, []));
 
-    const progress = stepsGoal > 0 ? currentStepCount / stepsGoal : 0;
+    // حساب النسبة
+    const progress = stepsGoal > 0 ? Math.min(currentStepCount / stepsGoal, 1) : 0;
 
-    // دالة لعرض المحتوى بناءً على الحالة
+    // دالة العرض
     const renderContent = () => {
         if (status === 'checking') {
             return <ActivityIndicator size="small" color={theme.primary} style={{ marginTop: 20 }} />;
         }
 
+        // إذا كان غير متصل، يظهر النص والأيقونة
         if (status === 'disconnected') {
             return (
                 <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -528,7 +539,7 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
             );
         }
 
-        // لو متصل (status === 'connected') اعرض الدائرة والأرقام
+        // إذا تم الاتصال بنجاح: تظهر الدائرة والهدف
         return (
             <View style={styles.stepsCardContent}>
                 <View style={styles.stepsCardCircleContainer}>
