@@ -124,39 +124,17 @@ const StepsScreen = () => {
         isFetchingRef.current = true;
 
         try {
-            // == تعديل: التحقق من الصلاحية حتى لو لم يكن مخزناً في AsyncStorage ==
-            // لأن المستخدم قد يكون متصلاً بالفعل من الإعدادات
-            let isConnected = false;
             const storedConnected = await AsyncStorage.getItem('isGoogleFitConnected');
-            
-            if (storedConnected === 'true') {
-                isConnected = true;
-            } else if (Platform.OS === 'android' && GoogleFit) {
-                // محاولة فحص خفية إذا كان المصادقة موجودة مسبقاً
-                 const isAuth = await GoogleFit.checkIsAuthorized();
-                 if (isAuth) {
-                     isConnected = true;
-                     await AsyncStorage.setItem('isGoogleFitConnected', 'true');
-                     setIsGoogleFitConnected(true);
-                 }
-            }
-
-            if (!isConnected || Platform.OS !== 'android' || !GoogleFit) {
-                setIsGoogleFitConnected(false); 
-                setLoading(false); 
-                isFetchingRef.current = false; 
-                return;
+            if (storedConnected !== 'true' || Platform.OS !== 'android' || !GoogleFit) {
+                setIsGoogleFitConnected(false); setLoading(false); isFetchingRef.current = false; return;
             }
 
             if (!isLiveUpdate) {
                 const isAuth = await GoogleFit.checkIsAuthorized();
                 if (!isAuth) {
-                    // إذا كان مسجلاً كمتصل ولكن الصلاحية مفقودة، نحاول إعادة الاتصال بصمت أو نفشل
-                    // هنا سنفترض أنه متصل ونحاول، إذا فشل سيظهر الخطأ
-                    setIsGoogleFitConnected(false);
-                } else {
-                    setIsGoogleFitConnected(true);
+                    try { await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] }); } catch(e){}
                 }
+                setIsGoogleFitConnected(true);
             }
             
             const now = new Date();
@@ -227,24 +205,16 @@ const StepsScreen = () => {
                 const savedGoal = await AsyncStorage.getItem('stepsGoal');
                 if (isMounted && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
 
-                // == التعديل الهام هنا ==
-                // نقوم بتشغيل جلب البيانات فوراً دون انتظار الصلاحيات لكي لا يتوقف زر الربط
-                if (isMounted) fetchGoogleFitData(true, false);
-
-                // نطلب الصلاحيات بشكل منفصل (Non-blocking)
+                // === التعديل هنا: طلب الإذن تلقائياً عند الدخول للصفحة ===
                 if (Platform.OS === 'android') {
-                    PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BODY_SENSORS).then(() => {
-                        if (Platform.Version >= 29) {
-                            PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION);
-                        }
-                    }).catch(err => console.warn(err));
+                    // هذا السطر سيظهر الرسالة فوراً دون التأثير على باقي الكود
+                    PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BODY_SENSORS);
                 }
+                // =======================================================
 
                 InteractionManager.runAfterInteractions(() => {
                     if (isMounted) {
-                        // إعادة المحاولة بعد التفاعل لضمان التحديث
-                        fetchGoogleFitData(false, true);
-                        
+                        fetchGoogleFitData(true, false);
                         appStateSubscription = AppState.addEventListener('change', nextAppState => {
                             if (nextAppState === 'active' && isMounted) {
                                 fetchGoogleFitData(false, true);
@@ -268,22 +238,16 @@ const StepsScreen = () => {
     
     const connectGoogleFit = async () => {
         if (!GoogleFit) {
-             // Alert.alert(t('errorTitle'), t('notAvailableMsg'));
+             Alert.alert(t('errorTitle'), t('notAvailableMsg'));
              return;
         }
-        setLoading(true); // إظهار التحميل عند الضغط
         try {
             let permissionGranted = true;
-            
-            if (Platform.OS === 'android') {
-                await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BODY_SENSORS);
-
-                if (Platform.Version >= 29) {
-                    const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION);
-                    if (granted !== PermissionsAndroid.RESULTS.GRANTED) permissionGranted = false;
-                }
+            // هذا الجزء خاص بزر الربط، ويعمل كما في الكود الأصلي
+            if (Platform.OS === 'android' && Platform.Version >= 29) {
+                const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION);
+                if (granted !== PermissionsAndroid.RESULTS.GRANTED) permissionGranted = false;
             }
-
             if (permissionGranted) {
                 const options = { scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] };
                 const res = await GoogleFit.authorize(options);
@@ -291,16 +255,9 @@ const StepsScreen = () => {
                     setIsGoogleFitConnected(true);
                     await AsyncStorage.setItem('isGoogleFitConnected', 'true');
                     fetchGoogleFitData(true, false);
-                } else {
-                    setLoading(false); // فشل الربط، أوقف التحميل ليظهر الزر مرة أخرى
                 }
-            } else {
-                setLoading(false);
             }
-        } catch (error) { 
-            console.warn("Auth Error:", error); 
-            setLoading(false);
-        }
+        } catch (error) { console.warn("Auth Error:", error); }
     };
 
     useEffect(() => {
@@ -368,17 +325,7 @@ const StepsScreen = () => {
     const progress = stepsGoal > 0 ? (displaySteps / stepsGoal) : 0;
 
     const renderTodaySummary = () => {
-        // == تعديل: التحقق من التحميل أولاً لإظهار سبينر بدلاً من دائرة فارغة ==
-        if (loading) {
-            return (
-                <View style={{ padding: 40, justifyContent: 'center', alignItems: 'center' }}>
-                    <ActivityIndicator size="large" color={theme.primary} />
-                </View>
-            );
-        }
-
-        // == تعديل: إذا لم يكن متصلاً، أظهر زر الربط بالتأكيد ==
-        if (!isGoogleFitConnected) {
+        if (!isGoogleFitConnected && !loading) {
             return (
                 <View style={styles.errorContainer}>
                     <MaterialCommunityIcons name="google-fit" size={48} color={theme.textSecondary} />
@@ -390,8 +337,6 @@ const StepsScreen = () => {
                 </View>
             );
         }
-
-        // إذا كان متصلاً وتم التحميل، أظهر الدائرة والإحصائيات
         return (
             <>
                 <View> 
@@ -446,7 +391,7 @@ const StepsScreen = () => {
                     {renderTodaySummary()}
                 </View>
 
-                {isGoogleFitConnected && !loading && (
+                {isGoogleFitConnected && (
                 <>
                     <View style={styles.card(theme)}>
                         <View style={styles.periodToggleContainer(theme, isRTL)}>
@@ -499,7 +444,7 @@ const StepsScreen = () => {
 
                     <View style={styles.card(theme)}>
                         <Text style={styles.sectionTitle(theme, isRTL)}>{t('periodStats').replace('{period}', periodLabel)}</Text>
-                         <>
+                        {loading ? <ActivityIndicator color={theme.primary}/> : <>
                             <View style={styles.statsRow(theme, isRTL)}>
                                 <Text style={styles.statLabel(theme, isRTL)}>{t('avgSteps')}</Text>
                                 <Text style={styles.statValue(theme, isRTL)}>{averagePeriodSteps.toLocaleString('en-US')}</Text>
@@ -512,7 +457,7 @@ const StepsScreen = () => {
                                 <Text style={styles.statLabel(theme, isRTL)}>{selectedPeriod === 'week' ? t('bestDay').replace('{period}', periodLabel) : `${t('bestDayLabel')} ${periodLabel}`}</Text>
                                 <Text style={styles.statValue(theme, isRTL)}>{bestDayInPeriod.toLocaleString('en-US')}</Text>
                             </View>
-                        </>
+                        </>}
                     </View>
                 </>
                 )}
