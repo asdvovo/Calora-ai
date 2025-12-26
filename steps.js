@@ -4,12 +4,11 @@ import {
     ActivityIndicator, Modal, TextInput, StatusBar,
     Platform, PermissionsAndroid, AppState, InteractionManager,
     I18nManager,
-    Alert 
+    DeviceEventEmitter 
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// نستورد المكتبة، ولكن سنتعامل معها بحذر شديد داخل الكود
 import GoogleFit, { Scopes } from 'react-native-google-fit'; 
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, useAnimatedProps } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -125,29 +124,18 @@ const StepsScreen = () => {
         isFetchingRef.current = true;
 
         try {
-            // !!! حماية من الانهيار: التحقق من وجود المكتبة !!!
-            if (!GoogleFit) {
-                console.log("GoogleFit module is missing");
-                setIsGoogleFitConnected(false); setLoading(false); isFetchingRef.current = false; return;
-            }
-            
-            // !!! حماية من الانهيار: استخدام try-catch عند استدعاء الوظائف الأصلية !!!
-            let isAuth = false;
-            try {
-                isAuth = await GoogleFit.checkIsAuthorized();
-            } catch (err) {
-                // إذا حدث الخطأ هنا، فهذا يعني أن التطبيق يحتاج لإعادة بناء (Rebuild)
-                console.log("Native Module Error (Need Rebuild):", err);
+            const storedConnected = await AsyncStorage.getItem('isGoogleFitConnected');
+            if (storedConnected !== 'true' || Platform.OS !== 'android' || !GoogleFit) {
                 setIsGoogleFitConnected(false); setLoading(false); isFetchingRef.current = false; return;
             }
 
-            if (!isAuth) {
-                setIsGoogleFitConnected(false);
-                setLoading(false);
-                isFetchingRef.current = false;
-                return;
+            if (!isLiveUpdate) {
+                const isAuth = await GoogleFit.checkIsAuthorized();
+                if (!isAuth) {
+                    try { await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] }); } catch(e){}
+                }
+                setIsGoogleFitConnected(true);
             }
-            setIsGoogleFitConnected(true);
             
             const now = new Date();
             const startOfDay = new Date();
@@ -200,47 +188,6 @@ const StepsScreen = () => {
             isFetchingRef.current = false;
         }
     }, []);
-    
-    const connectGoogleFit = async () => {
-        // حماية من الانهيار
-        if (!GoogleFit) {
-             Alert.alert(t('errorTitle'), t('notAvailableMsg') + " (Library not linked)");
-             return;
-        }
-        try {
-            // طلب إذن الحساسات (أندرويد 7 وما فوق)
-            await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BODY_SENSORS);
-
-            // طلب إذن النشاط البدني (أندرويد 10 وما فوق)
-            if (Platform.OS === 'android' && Platform.Version >= 29) {
-                await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION);
-            }
-            
-            const options = { 
-                scopes: [
-                    Scopes.FITNESS_ACTIVITY_READ, 
-                    Scopes.FITNESS_ACTIVITY_WRITE, 
-                    Scopes.FITNESS_BODY_READ
-                ] 
-            };
-
-            // حماية من خطأ عدم وجود Native Module
-            try {
-                const res = await GoogleFit.authorize(options);
-                if (res.success) {
-                    setIsGoogleFitConnected(true);
-                    await AsyncStorage.setItem('isGoogleFitConnected', 'true');
-                    fetchGoogleFitData(true, false);
-                } else {
-                    setIsGoogleFitConnected(false);
-                }
-            } catch (err) {
-                 Alert.alert("خطأ نظام", "يرجى إعادة بناء التطبيق (Run Android) لتفعيل المكتبة.");
-            }
-        } catch (error) { 
-            console.warn("Auth Error:", error); 
-        }
-    };
 
     useFocusEffect(
         useCallback(() => {
@@ -258,24 +205,9 @@ const StepsScreen = () => {
                 const savedGoal = await AsyncStorage.getItem('stepsGoal');
                 if (isMounted && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
 
-                InteractionManager.runAfterInteractions(async () => {
+                InteractionManager.runAfterInteractions(() => {
                     if (isMounted) {
-                        // حماية عند بدء التشغيل
-                        try {
-                            if(GoogleFit) {
-                                const isAuth = await GoogleFit.checkIsAuthorized();
-                                if (isAuth) {
-                                    setIsGoogleFitConnected(true);
-                                    fetchGoogleFitData(true, false);
-                                } else {
-                                    // محاولة الاتصال التلقائي (تطلب الأذونات)
-                                    connectGoogleFit();
-                                }
-                            }
-                        } catch (e) {
-                            console.log("App needs rebuild, bypassing fit check.");
-                        }
-
+                        fetchGoogleFitData(true, false);
                         appStateSubscription = AppState.addEventListener('change', nextAppState => {
                             if (nextAppState === 'active' && isMounted) {
                                 fetchGoogleFitData(false, true);
@@ -296,6 +228,39 @@ const StepsScreen = () => {
             };
         }, [fetchGoogleFitData]) 
     );
+    
+    const connectGoogleFit = async () => {
+        if (!GoogleFit) {
+             Alert.alert(t('errorTitle'), t('notAvailableMsg'));
+             return;
+        }
+        try {
+            let permissionGranted = true;
+            
+            // --- التعديل هنا لدعم أندرويد 7 وحساسات الجسم ---
+            if (Platform.OS === 'android') {
+                // طلب إذن حساسات الجسم لجميع نسخ الأندرويد (بما فيها أندرويد 7)
+                await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BODY_SENSORS);
+
+                // طلب إذن التعرف على النشاط للأندرويد 10 وما فوق
+                if (Platform.Version >= 29) {
+                    const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION);
+                    if (granted !== PermissionsAndroid.RESULTS.GRANTED) permissionGranted = false;
+                }
+            }
+            // ------------------------------------------------
+
+            if (permissionGranted) {
+                const options = { scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] };
+                const res = await GoogleFit.authorize(options);
+                if (res.success) {
+                    setIsGoogleFitConnected(true);
+                    await AsyncStorage.setItem('isGoogleFitConnected', 'true');
+                    fetchGoogleFitData(true, false);
+                }
+            }
+        } catch (error) { console.warn("Auth Error:", error); }
+    };
 
     useEffect(() => {
         setSelectedBarIndex(null);
