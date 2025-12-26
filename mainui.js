@@ -467,23 +467,20 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
 
         const fetchData = async () => {
             try {
-                // 1. جلب الهدف وتحديثه عند التركيز على الشاشة
+                // 1. جلب الهدف
                 const savedGoal = await AsyncStorage.getItem('stepsGoal');
                 if (isActive && savedGoal) {
                     setGoal(parseInt(savedGoal, 10));
                 }
 
-                // 2. التحقق من حالة الاتصال
-                const storedStatus = await AsyncStorage.getItem('isGoogleFitConnected');
-                if (storedStatus !== 'true') {
-                    if (isActive) setIsConnected(false);
-                    return; 
-                }
-                if (isActive) setIsConnected(true);
-
-                // 3. جلب الخطوات من Google Fit
+                // 2. التحقق من Google Fit مباشرة (ده التعديل المهم)
                 if (Platform.OS === 'android' && GoogleFit) {
+                    // نتأكد من الصلاحية مباشرة من Google Fit
                     const isAuth = await GoogleFit.checkIsAuthorized();
+                    
+                    // نحدث حالة الاتصال بناءً على الحقيقة مش التخزين
+                    if (isActive) setIsConnected(isAuth);
+
                     if (isAuth) {
                         const now = new Date();
                         const startOfDay = new Date();
@@ -499,6 +496,7 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                         const res = await GoogleFit.getDailyStepCountSamples(opt);
                         if (isActive && res && res.length > 0) {
                             let maxSteps = 0;
+                            // نفس اللوجيك بالظبط اللي في صفحة الخطوات عشان الأرقام تطابق
                             res.forEach(source => {
                                 if (source.steps && source.steps.length > 0) {
                                     source.steps.forEach(step => {
@@ -506,15 +504,9 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                                     });
                                 }
                             });
-                            // محاولة جمع الخطوات كحل بديل إذا لم تنجح الطريقة الأولى
-                            if (maxSteps === 0 && res.some(s => s.steps.length > 0)) {
-                                 res.forEach(source => {
-                                     if(source.steps.length > 0) maxSteps += source.steps[0].value;
-                                 });
-                            }
                             setSteps(maxSteps);
                         }
-                    } 
+                    }
                 }
             } catch (e) {
                 console.log("Steps Widget Error:", e);

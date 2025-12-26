@@ -98,7 +98,11 @@ const StepsScreen = () => {
     const [rawStepsData, setRawStepsData] = useState({}); 
     const [loading, setLoading] = useState(true);
     const [isGoogleFitConnected, setIsGoogleFitConnected] = useState(false); 
+    
+    // متغيرات المودال الجديدة
     const [isPromptVisible, setPromptVisible] = useState(false);
+    const [tempGoalInput, setTempGoalInput] = useState(''); // لتخزين الرقم أثناء الكتابة
+
     const [selectedPeriod, setSelectedPeriod] = useState('week');
     
     const [language, setLanguage] = useState('en');
@@ -205,12 +209,9 @@ const StepsScreen = () => {
                 const savedGoal = await AsyncStorage.getItem('stepsGoal');
                 if (isMounted && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
 
-                // === التعديل هنا: طلب الإذن تلقائياً عند الدخول للصفحة ===
                 if (Platform.OS === 'android') {
-                    // هذا السطر سيظهر الرسالة فوراً دون التأثير على باقي الكود
                     PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BODY_SENSORS);
                 }
-                // =======================================================
 
                 InteractionManager.runAfterInteractions(() => {
                     if (isMounted) {
@@ -243,7 +244,6 @@ const StepsScreen = () => {
         }
         try {
             let permissionGranted = true;
-            // هذا الجزء خاص بزر الربط، ويعمل كما في الكود الأصلي
             if (Platform.OS === 'android' && Platform.Version >= 29) {
                 const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION);
                 if (granted !== PermissionsAndroid.RESULTS.GRANTED) permissionGranted = false;
@@ -308,6 +308,22 @@ const StepsScreen = () => {
         } catch (err) { }
     }, [selectedPeriod, rawStepsData, language]);
     
+    // دالة فتح المودال
+    const handleOpenGoalModal = () => {
+        setTempGoalInput(''); // أو ممكن تخليها stepsGoal.toString() لو عايز الرقم الحالي يظهر
+        setPromptVisible(true);
+    };
+
+    // دالة حفظ الهدف الجديد
+    const handleSaveGoal = () => {
+        const val = parseInt(tempGoalInput);
+        if (val > 0) { 
+            setStepsGoal(val); 
+            AsyncStorage.setItem('stepsGoal', val.toString()); 
+        }
+        setPromptVisible(false);
+    };
+
     const distance = (displaySteps * STEP_LENGTH_KM).toFixed(2);
     const calories = Math.round(displaySteps * CALORIES_PER_STEP);
     const totalPeriodSteps = historicalData.reduce((sum, item) => sum + item.steps, 0);
@@ -343,7 +359,7 @@ const StepsScreen = () => {
                     <AnimatedStepsCircle size={180} strokeWidth={15} currentStepCount={displaySteps} progress={progress} theme={theme} />
                 </View>
                 <View style={styles.subStatsContainer(isRTL)}>
-                    <TouchableOpacity style={styles.subStatBox} onPress={() => setPromptVisible(true)}>
+                    <TouchableOpacity style={styles.subStatBox} onPress={handleOpenGoalModal}>
                         <MaterialCommunityIcons name="flag-checkered" size={24} color={theme.accentBlue} />
                         <Text style={styles.subStatText(theme)}>{stepsGoal.toLocaleString('en-US')}</Text>
                     </TouchableOpacity>
@@ -363,6 +379,8 @@ const StepsScreen = () => {
     return (
         <SafeAreaView style={styles.modalPage(theme)}>
             <StatusBar barStyle={theme.statusBar} backgroundColor={theme.background} />
+            
+            {/* --- بداية المودال المعدل --- */}
             <Modal visible={isPromptVisible} transparent animationType="fade" onRequestClose={() => setPromptVisible(false)}>
                 <View style={styles.modalOverlay(theme)}>
                     <View style={styles.promptContainer(theme)}>
@@ -372,18 +390,23 @@ const StepsScreen = () => {
                             keyboardType="numeric" 
                             placeholder="8000"
                             placeholderTextColor={theme.textSecondary}
-                            onSubmitEditing={(e) => {
-                                const val = parseInt(e.nativeEvent.text);
-                                if(val > 0) { setStepsGoal(val); AsyncStorage.setItem('stepsGoal', val.toString()); }
-                                setPromptVisible(false);
-                            }}
+                            value={tempGoalInput}
+                            onChangeText={setTempGoalInput} // حفظ الرقم أثناء الكتابة
+                            onSubmitEditing={handleSaveGoal} // حفظ عند الضغط على Enter في الكيبورد
                         />
-                        <TouchableOpacity onPress={() => setPromptVisible(false)} style={[styles.promptButton, styles.promptButtonPrimary(theme)]}>
-                            <Text style={styles.promptButtonTextPrimary}>{t('cancel')}</Text>
-                        </TouchableOpacity>
+                        <View style={styles.promptButtonsContainer(isRTL)}>
+                            <TouchableOpacity onPress={() => setPromptVisible(false)} style={[styles.promptButton, styles.cancelButton(theme)]}>
+                                <Text style={styles.cancelButtonText(theme)}>{t('cancel')}</Text>
+                            </TouchableOpacity>
+                            
+                            <TouchableOpacity onPress={handleSaveGoal} style={[styles.promptButton, styles.promptButtonPrimary(theme)]}>
+                                <Text style={styles.promptButtonTextPrimary}>{t('save')}</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
             </Modal>
+            {/* --- نهاية المودال المعدل --- */}
 
             <ScrollView contentContainerStyle={styles.modalPageContent}>
                 <View style={[styles.card(theme), styles.todaySummaryCard]}>
@@ -489,9 +512,16 @@ const styles = {
     promptContainer: (theme) => ({ width: '85%', backgroundColor: theme.card, borderRadius: 15, padding: 20 }),
     promptTitle: (theme) => ({ fontSize: 18, fontWeight: 'bold', textAlign: 'center', color: theme.textPrimary, marginBottom: 15 }),
     promptInput: (theme) => ({ borderWidth: 1, borderColor: theme.progressUnfilled, backgroundColor: theme.inputBackground, color: theme.textPrimary, borderRadius: 8, padding: 10, textAlign: 'center', fontSize: 18, marginBottom: 20 }),
-    promptButton: { paddingVertical: 10, paddingHorizontal: 25, borderRadius: 8, alignItems: 'center' },
+    
+    // --- Styles الجديدة للأزرار ---
+    promptButtonsContainer: (isRTL) => ({ flexDirection: isRTL ? 'row-reverse' : 'row', justifyContent: 'space-between', width: '100%' }),
+    promptButton: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginHorizontal: 5 },
     promptButtonPrimary: (theme) => ({ backgroundColor: theme.primary }),
-    promptButtonTextPrimary: { color: 'white', fontWeight: 'bold' },
+    promptButtonTextPrimary: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+    cancelButton: (theme) => ({ backgroundColor: 'transparent', borderWidth: 1, borderColor: theme.textSecondary }),
+    cancelButtonText: (theme) => ({ color: theme.textSecondary, fontWeight: 'bold', fontSize: 16 }),
+    // ----------------------------
+
     periodToggleContainer: (theme, isRTL) => ({ flexDirection: isRTL ? 'row-reverse' : 'row', backgroundColor: theme.background, borderRadius: 10, padding: 4, marginBottom: 10 }),
     periodToggleButton: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
     activePeriodButton: (theme) => ({ backgroundColor: theme.card, elevation: 2 }),
