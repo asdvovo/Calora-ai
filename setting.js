@@ -186,17 +186,23 @@ const SettingsToggleItem = ({ icon, label, description, value, onValueChange, th
     <View style={[styles.iconContainer, { backgroundColor: theme.iconContainer }]}>
       <Icon name={icon} size={22} color={theme.iconColor} />
     </View>
-    <View style={{ marginHorizontal: 10 }}> 
+    <View style={{ 
+        flex: 1, 
+        marginHorizontal: 10, 
+        justifyContent: 'center',
+        alignItems: isRTL ? 'flex-start' : 'flex-end' 
+    }}> 
       <Text style={[styles.label, { 
           color: theme.text,
-          textAlign: isRTL ? 'right' : 'left'
+          textAlign: isRTL ? 'left' : 'right'
       }]}>{label}</Text>
+      
       {description && <Text style={[styles.description, { 
           color: theme.secondaryText,
-          textAlign: isRTL ? 'right' : 'left'
+          textAlign: isRTL ? 'left' : 'right',
+          marginTop: 2
       }]}>{description}</Text>}
     </View>
-    <View style={{ flex: 1 }} />
     <View style={{ flexDirection: getFlexDirection(isRTL), alignItems: 'center' }}>
         {time && value && (
         <TouchableOpacity onPress={onTimePress}>
@@ -312,8 +318,6 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
         const loadSettings = async () => {
             const savedTheme = await AsyncStorage.getItem('isDarkMode');
             setIsDarkMode(savedTheme === 'true');
-            
-            // تحقق من الاتصال بـ Google Fit
             const isConnected = await AsyncStorage.getItem('isGoogleFitConnected') === 'true';
             setIsGoogleFitConnected(isConnected);
             
@@ -410,8 +414,6 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
   };
 
   const handleToggleStepsReminder = async () => {
-    // هذه الوظيفة تعتمد على TaskManager المعرف في MainUI
-    // يجب أن تكون المهمة معرفة هناك باسم 'steps-notification-task'
     const { status: notificationStatus } = await Notifications.requestPermissionsAsync();
     if (notificationStatus !== 'granted') {
         Alert.alert(t('notificationsPermissionTitle'), t('notificationsPermissionMessage'));
@@ -422,27 +424,24 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
     await AsyncStorage.setItem('reminderSettings', JSON.stringify(newReminders));
     
     if (newReminders.stepsGoal.enabled) {
-        // نكتفي بتسجيل الإعدادات، والمهمة المسجلة في MainUI ستقرأها
-        // أو يمكن محاولة التسجيل هنا إذا كان مدعوماً
         try {
-            if (TaskManager && TaskManager.registerTaskAsync) {
-                // اسم المهمة يجب أن يطابق المعرف في MainUI
-                await TaskManager.registerTaskAsync('steps-notification-task', { 
-                    minimumInterval: 15 * 60,
-                    stopOnTerminate: false,
-                    startOnBoot: true,
-                });
+            // التحقق لتجنب تكرار التسجيل
+            const isRegistered = await TaskManager.isTaskRegisteredAsync('steps-notification-task');
+            if (!isRegistered && TaskManager && TaskManager.registerTaskAsync) {
+                await TaskManager.registerTaskAsync('steps-notification-task', { minimumInterval: 15 * 60 });
             }
         } catch (e) {
-            console.log("Background task registration/unregistration handled centrally.");
+            console.log("Background task registration failed", e);
         }
     } else {
-         try {
-            if (TaskManager && TaskManager.unregisterTaskAsync) {
+        try {
+            // التحقق قبل الحذف لتجنب TaskNotFoundException
+            const isRegistered = await TaskManager.isTaskRegisteredAsync('steps-notification-task');
+            if (isRegistered && TaskManager && TaskManager.unregisterTaskAsync) {
                 await TaskManager.unregisterTaskAsync('steps-notification-task');
             }
         } catch (e) {
-            console.log("Unregister task failed", e);
+            console.log("Unregister task failed (safe)", e);
         }
     }
     Alert.alert(t('remindersSaved'));
@@ -518,84 +517,46 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
   const copyToClipboard = () => { if (exportDataContent) { Clipboard.setString(exportDataContent); Alert.alert(t('copied')); } };
   const handleDeleteAccount = () => { Alert.alert(t('deleteAccountTitle'), t('deleteAccountMessage'), [{ text: t('cancel'), style: 'cancel' }, { text: t('delete'), style: 'destructive', onPress: () => console.log("Account deleted") }]); };
   
-  // دالة الاتصال المحسنة بـ Google Fit
   const handleConnectGoogleFit = async () => {
-    if (Platform.OS !== 'android') {
-        Alert.alert(t('error'), "Google Fit is only supported on Android.");
+    if (!GoogleFit) {
+        Alert.alert(t('error'), t('snackFeatureAlertTitle'));
         return;
     }
-
     setIsConnecting(true);
-    const options = { 
-        scopes: [ 
-            Scopes.FITNESS_ACTIVITY_READ, 
-            Scopes.FITNESS_BODY_READ, 
-            Scopes.FITNESS_NUTRITION_READ, 
-        ], 
-    };
-    
+    const options = { scopes: [ Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_BODY_READ, Scopes.FITNESS_NUTRITION_READ, ], };
     try {
-        // التحقق أولاً
-        await GoogleFit.checkIsAuthorized();
-        if(GoogleFit.isAuthorized) {
-             setIsGoogleFitConnected(true);
-             await AsyncStorage.setItem('isGoogleFitConnected', 'true');
-             Alert.alert('Google Fit', t('connectionSuccess'));
-             setIsConnecting(false);
-             return;
-        }
-
         const authResult = await GoogleFit.authorize(options);
-        if (authResult.success) { 
-            setIsGoogleFitConnected(true); 
-            await AsyncStorage.setItem('isGoogleFitConnected', 'true'); 
-            Alert.alert('Google Fit', t('connectionSuccess'));
-        } else { 
-            console.log("AUTH_DENIED", authResult.message); 
-            setIsGoogleFitConnected(false); 
-            await AsyncStorage.setItem('isGoogleFitConnected', 'false'); 
-            Alert.alert('Google Fit', t('connectionFailed') + "\n" + (authResult.message || "Unknown error")); 
-        }
-    } catch (error) { 
-        console.error("AUTH_ERROR", error); 
-        setIsGoogleFitConnected(false); 
-        await AsyncStorage.setItem('isGoogleFitConnected', 'false'); 
-        Alert.alert('Google Fit', t('connectionFailed')); 
-    } finally { 
-        setIsConnecting(false); 
-    }
+        if (authResult.success) { setIsGoogleFitConnected(true); await AsyncStorage.setItem('isGoogleFitConnected', 'true'); Alert.alert('Google Fit', t('connectionSuccess'));
+        } else { console.log("AUTH_DENIED", authResult.message); setIsGoogleFitConnected(false); await AsyncStorage.setItem('isGoogleFitConnected', 'false'); Alert.alert('Google Fit', t('connectionFailed')); }
+    } catch (error) { console.error("AUTH_ERROR", error); setIsGoogleFitConnected(false); await AsyncStorage.setItem('isGoogleFitConnected', 'false'); Alert.alert('Google Fit', t('connectionFailed')); } finally { setIsConnecting(false); }
   };
-
+  
   const handleDisconnectGoogleFit = async () => { 
       try { 
-          await GoogleFit.disconnect(); 
+          if(GoogleFit) await GoogleFit.disconnect(); 
           setIsGoogleFitConnected(false); 
           await AsyncStorage.setItem('isGoogleFitConnected', 'false'); 
           Alert.alert("Google Fit", t('disconnectSuccess')); 
-      } catch (error) { 
-          console.error("DISCONNECT_ERROR", error); 
-      } 
+      } catch (error) { console.error("DISCONNECT_ERROR", error); } 
   };
 
 const handleSaveLanguage = async () => {
     if (activeLanguage === selectedLanguage) { setCurrentView('main'); return; }
     try {
+      await AsyncStorage.setItem('appLanguage', selectedLanguage);
+      const isAr = selectedLanguage === 'ar';
       
-      if (isGoogleFitConnected) {
+      if (isGoogleFitConnected && GoogleFit) {
           try {
               await GoogleFit.disconnect();
-              setIsGoogleFitConnected(false); 
           } catch (err) {
               console.log("Disconnect error before reload:", err);
           }
       }
 
-      await AsyncStorage.setItem('appLanguage', selectedLanguage);
-      
-      const isAr = selectedLanguage === 'ar';
       setActiveLanguage(selectedLanguage);
 
-      I18nManager.allowRTL(isAr);
+      I18nManager.allowRTL(true);
       I18nManager.forceRTL(isAr);
       
       Alert.alert(
@@ -612,7 +573,7 @@ const handleSaveLanguage = async () => {
                            console.log("Reload error", e);
                            Alert.alert("Note", "Please close and reopen the app manually.");
                         }
-                    }, 500); 
+                    }, 500);
                 }, 
             }, 
         ], 
@@ -686,26 +647,17 @@ const styles = StyleSheet.create({
   headerButton: { width: 50, height: 50, justifyContent: 'center', alignItems: 'center' },
   headerActionText: { fontSize: 16, fontWeight: '600', },
   scrollContent: { paddingBottom: 20 },
-  
   settingsItem: { alignItems: 'center', justifyContent: 'space-between', borderRadius: 10, padding: 12, marginHorizontal: 16, marginBottom: 10, elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2 },
-  
   iconContainer: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  
   label: { fontSize: 16 },
-  description: { fontSize: 12, paddingTop: 2 },
-  
+  description: { fontSize: 10, paddingTop: 2 },
   sectionHeader: { fontSize: 13, fontWeight: '600', textTransform: 'uppercase', paddingHorizontal: 28, paddingVertical: 10, marginTop: 10 },
-  
   toggleContainer: { width: 52, height: 26, borderRadius: 13, padding: 2, justifyContent: 'center' },
   toggleThumb: { width: 20, height: 20, borderRadius: 10, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
-  
   exportDescription: { fontSize: 15, lineHeight: 22, marginBottom: 24, paddingHorizontal: 12 },
-  
   exportButton: { alignItems: 'center', justifyContent: 'center', paddingVertical: 15, borderRadius: 12, marginHorizontal: 16, },
   exportButtonText: { fontSize: 16, fontWeight: 'bold', },
-  
   dataBox: { marginTop: 20, padding: 10, height: 200, borderWidth: 1, borderRadius: 8, textAlignVertical: 'top', fontSize: 12 },
-  
   timeText: { fontSize: 16, fontWeight: '600', marginHorizontal: 10, },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   modalContent: { borderTopRightRadius: 20, borderTopLeftRadius: 20, padding: 20, position: 'absolute', bottom: 0, width: '100%' },

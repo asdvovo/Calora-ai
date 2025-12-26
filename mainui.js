@@ -19,7 +19,6 @@ import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
 import GoogleFit from 'react-native-google-fit'; 
 
-// --- Screen Imports ---
 import ProfileScreen from './profile';
 import CameraScreen from './camera';
 import WorkoutLogScreen from './workoutlog';
@@ -35,7 +34,6 @@ import AboutScreen from './about';
 
 const STEPS_NOTIFICATION_TASK = 'steps-notification-task';
 
-// --- Helper for Layout Direction ---
 const getFlexDirection = (language) => {
     const isAppRTL = language === 'ar';
     const isSystemRTL = I18nManager.isRTL;
@@ -46,8 +44,6 @@ const getTextAlign = (language) => {
     return language === 'ar' ? 'right' : 'left';
 };
 
-// --- Task Manager Definition (Global) ---
-// تم إضافة Try-Catch وتأمين الكود لمنع الانهيار
 TaskManager.defineTask(STEPS_NOTIFICATION_TASK, async () => {
     try {
         const settingsRaw = await AsyncStorage.getItem('reminderSettings');
@@ -71,32 +67,24 @@ TaskManager.defineTask(STEPS_NOTIFICATION_TASK, async () => {
 
         let currentSteps = 0;
 
-        if (Platform.OS === 'android') {
-            // لا تعتمد على authorize مباشرة لتجنب المشاكل في الخلفية
-            // افترض أن الصلاحيات ممنوحة مسبقاً
+        if (Platform.OS === 'android' && GoogleFit) {
             try {
-                // محاولة التحقق السريع (قد لا تعمل دائماً في الخلفية بدون Activity)
-                // لذلك نستخدم try catch عام
-                if (GoogleFit) {
-                    // Check if authorized already? (Hard to do in background without context sometimes)
-                    // We assume user authorized in foreground.
-                    const now = new Date();
-                    const opt = {
-                        startDate: start.toISOString(),
-                        endDate: now.toISOString(),
-                        bucketUnit: 'DAY',
-                        bucketInterval: 1
-                    };
-                    const res = await GoogleFit.getDailyStepCountSamples(opt);
-                    if (res && res.length > 0) {
-                        res.forEach(source => {
-                             if (source.steps && source.steps.length > 0) {
-                                source.steps.forEach(step => {
-                                    if(step.value > currentSteps) currentSteps = step.value;
-                                });
-                            }
-                        });
-                    }
+                const now = new Date();
+                const opt = {
+                    startDate: start.toISOString(),
+                    endDate: now.toISOString(),
+                    bucketUnit: 'DAY',
+                    bucketInterval: 1
+                };
+                const res = await GoogleFit.getDailyStepCountSamples(opt);
+                if (res && res.length > 0) {
+                    res.forEach(source => {
+                         if (source.steps && source.steps.length > 0) {
+                            source.steps.forEach(step => {
+                                if(step.value > currentSteps) currentSteps = step.value;
+                            });
+                        }
+                    });
                 }
             } catch (gfError) {
                 console.log("GoogleFit bg error", gfError);
@@ -164,7 +152,6 @@ async function registerForPushNotificationsAsync() { if (Platform.OS === 'androi
 const DateNavigator = ({ selectedDate, onDateSelect, referenceToday, theme, t, language }) => {
     const handlePrevWeek = () => { const newDate = new Date(selectedDate); newDate.setDate(selectedDate.getDate() - 7); onDateSelect(newDate); };
     const handleNextWeek = () => { const newDate = new Date(selectedDate); newDate.setDate(selectedDate.getDate() + 7); onDateSelect(newDate); };
-    
     const weekDays = t('weekdays');
     const dates = [];
     const startDayIndex = language === 'ar' ? 6 : 0; 
@@ -172,7 +159,6 @@ const DateNavigator = ({ selectedDate, onDateSelect, referenceToday, theme, t, l
     const startDate = new Date(selectedDate);
     let diff = currentDayIndex - startDayIndex;
     if (diff < 0) { diff += 7; }
-    
     startDate.setDate(selectedDate.getDate() - diff);
     startDate.setHours(0, 0, 0, 0);
 
@@ -181,7 +167,6 @@ const DateNavigator = ({ selectedDate, onDateSelect, referenceToday, theme, t, l
         date.setDate(startDate.getDate() + i);
         dates.push(date);
     }
-    
     const displayDates = dates;
     const isSelected = (date) => date.toDateString() === selectedDate.toDateString();
     const monthYearString = selectedDate.toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US', { month: 'long', year: 'numeric' });
@@ -193,7 +178,6 @@ const DateNavigator = ({ selectedDate, onDateSelect, referenceToday, theme, t, l
     todayWeekStart.setHours(0, 0, 0, 0);
 
     const isNextDisabled = startDate.getTime() >= todayWeekStart.getTime();
-
     const flexDirection = getFlexDirection(language);
 
     return (
@@ -470,31 +454,31 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
     const [isConnected, setIsConnected] = useState(false);
 
     useFocusEffect(useCallback(() => {
+        let isActive = true;
+
         const fetchSteps = async () => {
             const savedGoal = await AsyncStorage.getItem('stepsGoal');
-            if (savedGoal) setGoal(parseInt(savedGoal, 10));
+            if (isActive && savedGoal) setGoal(parseInt(savedGoal, 10));
 
             let isAuth = false;
-            if (Platform.OS === 'android') {
+            
+            if (Platform.OS === 'android' && GoogleFit) {
                 try {
-                    // Check directly with the native module
                     await GoogleFit.checkIsAuthorized();
                     if (GoogleFit.isAuthorized) {
                          isAuth = true;
-                         // Force update local storage if mismatch
                          await AsyncStorage.setItem('isGoogleFitConnected', 'true');
                     }
                 } catch (e) {
-                    console.log("Check Auth Error:", e);
+                    console.log("Check Auth Error safe:", e);
                 }
             }
 
-            // Fallback to storage if check fails or on other platforms
             const storedStatus = await AsyncStorage.getItem('isGoogleFitConnected');
             const finalStatus = isAuth || (storedStatus === 'true');
-            setIsConnected(finalStatus);
+            if (isActive) setIsConnected(finalStatus);
 
-            if (finalStatus && Platform.OS === 'android') {
+            if (finalStatus && Platform.OS === 'android' && GoogleFit) {
                 const now = new Date();
                 const startOfDay = new Date();
                 startOfDay.setHours(0, 0, 0, 0);
@@ -508,7 +492,7 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
 
                 try {
                     const res = await GoogleFit.getDailyStepCountSamples(opt);
-                    if (res && res.length > 0) {
+                    if (isActive && res && res.length > 0) {
                         let maxSteps = 0;
                         res.forEach(source => {
                             if (source.steps && source.steps.length > 0) {
@@ -517,7 +501,6 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                                 });
                             }
                         });
-                        // Fallback logic if maxSteps is still 0 but we have data
                         if (maxSteps === 0 && res.some(s => s.steps.length > 0)) {
                              res.forEach(source => {
                                  if(source.steps.length > 0) maxSteps += source.steps[0].value;
@@ -531,6 +514,8 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
             }
         };
         fetchSteps();
+        
+        return () => { isActive = false; };
     }, []));
 
     const progress = goal > 0 ? steps / goal : 0;
@@ -598,9 +583,7 @@ function DiaryScreen({ navigation, route, setHasProgress, theme, t, language }) 
         try { 
             const profileJson = await AsyncStorage.getItem('userProfile');
             const savedProfile = profileJson ? JSON.parse(profileJson) : null;
-            
             let goalToSet = 2000;
-            
             if (savedProfile && savedProfile.dailyGoal) {
                 goalToSet = savedProfile.dailyGoal;
             } else if (passedGoal) {
@@ -617,9 +600,7 @@ function DiaryScreen({ navigation, route, setHasProgress, theme, t, language }) 
                      await AsyncStorage.setItem('userProfile', JSON.stringify(profileToSave));
                  }
             }
-
             setDailyGoal(goalToSet);
-            
             const settingsJson = await AsyncStorage.getItem('waterSettings'); 
             setWaterGoal(settingsJson ? (JSON.parse(settingsJson).goal || 8) : 8);
             const dateKey = formatDateKey(selectedDate); 
@@ -673,12 +654,10 @@ function DiaryScreen({ navigation, route, setHasProgress, theme, t, language }) 
                 <NutrientSummaryCard data={{ protein: { consumed: calculatedTotals.protein, goal: macroGoals.protein }, carbs: { consumed: calculatedTotals.carbs, goal: macroGoals.carbs }, fat: { consumed: calculatedTotals.fat, goal: macroGoals.fat }, fiber: { consumed: calculatedTotals.fiber, goal: NUTRIENT_GOALS.fiber }, sugar: { consumed: calculatedTotals.sugar, goal: NUTRIENT_GOALS.sugar }, sodium: { consumed: calculatedTotals.sodium, goal: NUTRIENT_GOALS.sodium }, }} theme={theme} t={t} language={language} />
                 <DashboardGrid weight={dailyData.displayWeight || 0} water={dailyData.water || 0} waterGoal={waterGoal} totalExerciseCalories={totalExerciseCalories} onWeightPress={() => navigation.navigate('Weight')} onWaterPress={() => navigation.navigate('Water', { dateKey: formatDateKey(selectedDate) })} onWorkoutPress={() => navigation.navigate('WorkoutLog', { dateKey: formatDateKey(selectedDate) })} navigation={navigation} theme={theme} t={t} language={language} />
                 <DailyFoodLog items={allFoodItems} onPress={() => navigation.navigate('FoodLogDetail', { items: allFoodItems, dateString: selectedDate.toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) })} theme={theme} t={t} language={language} />
-                
                 <View style={[styles.sectionHeaderContainer, { alignItems: language === 'ar' ? 'flex-end' : 'flex-start' }]}>
                     <Text style={[styles.sectionTitle(theme), { textAlign: textAlign }]}>{t('mealSectionsTitle')}</Text>
                     <Text style={[styles.sectionDescription(theme), { textAlign: textAlign }]}>{t('mealSectionsDesc')}</Text>
                 </View>
-
                 <MealLoggingSection title={t('breakfast')} iconName="sunny-outline" items={dailyData.breakfast || []} onAddPress={handleOpenModal} mealKey="breakfast" isEditable={isToday} theme={theme} t={t} language={language} />
                 <MealLoggingSection title={t('lunch')} iconName="partly-sunny-outline" items={dailyData.lunch || []} onAddPress={handleOpenModal} mealKey="lunch" isEditable={isToday} theme={theme} t={t} language={language} />
                 <MealLoggingSection title={t('dinner')} iconName="moon-outline" items={dailyData.dinner || []} onAddPress={handleOpenModal} mealKey="dinner" isEditable={isToday} theme={theme} t={t} language={language} />
@@ -737,11 +716,9 @@ const MagicLineTabBar = ({ state, descriptors, navigation, theme, t, language })
 
     return (
         <View style={[styles.tabBarContainer(theme), { flexDirection: 'row', direction: 'ltr' }]}>
-            
             <View style={styles.animationWrapper}>
                 <LeafAnimation trigger={activeIndex} />
             </View>
-            
             <Animated.View style={[
                 styles.indicatorContainer, 
                 { width: TAB_WIDTH, left: 0 }, 
@@ -752,21 +729,17 @@ const MagicLineTabBar = ({ state, descriptors, navigation, theme, t, language })
                     <View style={[styles.cutout, styles.cutoutRight(theme)]} />
                 </View>
             </Animated.View>
-
             {orderedRoutes.map((route, index) => {
                 const descriptor = descriptors[route.key];
                 const { options } = descriptor;
                 const isFocused = currentActiveRouteName === route.name;
-
                 const onPress = () => {
                     const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
                     if (!isFocused && !event.defaultPrevented) { navigation.navigate(route.name); }
                 };
-
                 const iconAnimatedStyle = useAnimatedStyle(() => ({ transform: [{ translateY: withTiming(isFocused ? -32 : 0, { duration: 500 }) }], }));
                 const textAnimatedStyle = useAnimatedStyle(() => ({ opacity: withTiming(isFocused ? 1 : 0, { duration: 500 }), transform: [{ translateY: withTiming(isFocused ? 10 : 20, { duration: 500 }) }], }));
                 const isProfileTab = route.name === 'ProfileStack';
-                
                 return (
                     <TouchableOpacity key={route.key} style={[styles.tabItem, { width: TAB_WIDTH, zIndex: 1 }]} onPress={onPress}>
                         <Animated.View style={[styles.tabIconContainer, iconAnimatedStyle]}>
@@ -779,7 +752,6 @@ const MagicLineTabBar = ({ state, descriptors, navigation, theme, t, language })
         </View>
     );
 };
-
 
 const Tab = createBottomTabNavigator();
 const DiaryStack = createStackNavigator();
@@ -836,7 +808,6 @@ function MainUIScreen({ appLanguage }) {
   const [theme, setTheme] = useState(lightTheme);
   const [language, setLanguage] = useState(appLanguage);
   const [hasProgress, setHasProgress] = useState(false);
-  
   const navState = useNavigationState(state => state);
 
   useFocusEffect(

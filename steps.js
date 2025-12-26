@@ -13,7 +13,6 @@ import GoogleFit, { Scopes } from 'react-native-google-fit';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, useAnimatedProps } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 
-// --- إعدادات الألوان والثوابت ---
 const STEP_LENGTH_KM = 0.000762;
 const CALORIES_PER_STEP = 0.04;
 
@@ -38,7 +37,6 @@ const translations = {
     en: { screenTitle: 'Steps Report', todaySteps: 'Today\'s Steps', kmUnit: ' km', calUnit: ' kcal', last7Days: 'Last 7 Days', last30Days: 'Last 30 Days', periodSummary: '{period} Summary', week: 'Week', month: 'Month', noData: 'No data to display.', periodStats: '{period} Statistics', avgSteps: 'Daily Average:', totalSteps: 'Total {period} Steps:', bestDay: 'Best day in {period}:', changeGoalTitle: 'Change Daily Goal', changeGoalMsg: 'Enter your new steps goal:', goalPlaceholder: 'Ex: 8000', cancel: 'Cancel', save: 'Save', goalTooLargeTitle: 'Goal Too Large', goalTooLargeMsg: 'Please enter a number less than {maxSteps}.', errorTitle: 'Error', invalidNumber: 'Please enter a valid number.', notAvailableTitle: 'Google Fit Disconnected', notAvailableMsg: 'Please connect Google Fit to view steps.', connectBtn: 'Connect Google Fit', permissionDeniedTitle: 'Permission Denied', permissionDeniedMsg: 'Please grant physical activity permission.', bestDayLabel: 'Best:' }
 };
 
-// --- دوال الرسم ---
 const describeArc = (x, y, radius, startAngle, endAngle) => { 
     'worklet';
     if (typeof x !== 'number' || typeof y !== 'number' || typeof radius !== 'number' || isNaN(endAngle)) { return "M 0 0"; }
@@ -52,7 +50,6 @@ const describeArc = (x, y, radius, startAngle, endAngle) => {
 };
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
-// --- الدائرة المتحركة ---
 const AnimatedStepsCircle = ({ progress, size, strokeWidth, currentStepCount, theme }) => { 
     const RADIUS = size / 2; 
     const CENTER_RADIUS = RADIUS - strokeWidth / 2; 
@@ -104,13 +101,9 @@ const StepsScreen = () => {
     const [isPromptVisible, setPromptVisible] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState('week');
     
-    const [language, setLanguage] = useState(I18nManager.isRTL ? 'ar' : 'en');
+    const [language, setLanguage] = useState('en');
     const [selectedBarIndex, setSelectedBarIndex] = useState(null);
 
-    // **********************************************
-    // التغيير هنا: خلينا RTL لما اللغة تكون إنجليزي
-    // والعربي بقى بياخد false يعني LTR
-    // **********************************************
     const isRTL = language === 'en'; 
 
     const t = (key) => translations[language]?.[key] || translations['en'][key] || key;
@@ -132,7 +125,7 @@ const StepsScreen = () => {
 
         try {
             const storedConnected = await AsyncStorage.getItem('isGoogleFitConnected');
-            if (storedConnected !== 'true') {
+            if (storedConnected !== 'true' || Platform.OS !== 'android' || !GoogleFit) {
                 setIsGoogleFitConnected(false); setLoading(false); isFetchingRef.current = false; return;
             }
 
@@ -207,7 +200,7 @@ const StepsScreen = () => {
                 if (isMounted) setTheme(savedTheme === 'true' ? darkTheme : lightTheme);
                 
                 const savedLang = await AsyncStorage.getItem('appLanguage');
-                if (isMounted) setLanguage(savedLang || (I18nManager.isRTL ? 'ar' : 'en')); 
+                if (isMounted) setLanguage(savedLang || 'en'); 
 
                 const savedGoal = await AsyncStorage.getItem('stepsGoal');
                 if (isMounted && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
@@ -237,6 +230,10 @@ const StepsScreen = () => {
     );
     
     const connectGoogleFit = async () => {
+        if (!GoogleFit) {
+             Alert.alert(t('errorTitle'), t('notAvailableMsg'));
+             return;
+        }
         try {
             let permissionGranted = true;
             if (Platform.OS === 'android' && Platform.Version >= 29) {
