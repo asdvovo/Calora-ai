@@ -48,6 +48,7 @@ const getTextAlign = (language) => {
     return language === 'ar' ? 'right' : 'left';
 };
 
+// --- تعريف التاسك في الخلفية ---
 TaskManager.defineTask(STEPS_NOTIFICATION_TASK, async () => {
     try {
         const settingsRaw = await AsyncStorage.getItem('reminderSettings');
@@ -69,41 +70,13 @@ TaskManager.defineTask(STEPS_NOTIFICATION_TASK, async () => {
         const savedGoal = await AsyncStorage.getItem('stepsGoal');
         const goal = savedGoal ? parseInt(savedGoal, 10) : 10000;
 
+        // محاولة جلب الخطوات في الخلفية
         let currentSteps = 0;
-
-        if (Platform.OS === 'android' && GoogleFit) {
-            try {
-                const now = new Date();
-                const opt = {
-                    startDate: start.toISOString(),
-                    endDate: now.toISOString(),
-                    bucketUnit: 'DAY',
-                    bucketInterval: 1
-                };
-                const isAuthorized = await GoogleFit.checkIsAuthorized();
-                if (isAuthorized) {
-                    const res = await GoogleFit.getDailyStepCountSamples(opt);
-                    if (res && res.length > 0) {
-                        res.forEach(source => {
-                             if (source.steps && source.steps.length > 0) {
-                                source.steps.forEach(step => {
-                                    if(step.value > currentSteps) currentSteps = step.value;
-                                });
-                            }
-                        });
-                    }
-                }
-            } catch (gfError) {
-                console.log("GoogleFit bg error", gfError);
-            }
-        } 
-        
-        if (currentSteps === 0) {
-            const isAvailable = await Pedometer.isAvailableAsync();
-            if (isAvailable) {
-                const { steps } = await Pedometer.getStepCountAsync(start, new Date());
-                currentSteps = steps;
-            }
+        const isAvailable = await Pedometer.isAvailableAsync();
+        if (isAvailable) {
+            const end = new Date();
+            const { steps } = await Pedometer.getStepCountAsync(start, end);
+            currentSteps = steps;
         }
 
         if (currentSteps >= goal) {
@@ -457,70 +430,87 @@ const SmallWorkoutCard = ({ totalCaloriesBurned = 0, onPress, theme, t, language
     ); 
 };
 
+// --- START: تم تعديل كارد الخطوات بالكامل هنا ---
 const SmallStepsCard = ({ navigation, theme, t, language }) => { 
-    const [steps, setSteps] = useState(0);
-    const [goal, setGoal] = useState(10000);
-    const [isConnected, setIsConnected] = useState(false);
+    const [status, setStatus] = useState('checking');
+    const [currentStepCount, setCurrentStepCount] = useState(0);
+    const [stepsGoal, setStepsGoal] = useState(10000);
 
     useFocusEffect(useCallback(() => {
-        let isActive = true;
+        const subscribe = async () => {
+            // جلب الهدف
+            const savedGoal = await AsyncStorage.getItem('stepsGoal');
+            if (savedGoal) setStepsGoal(parseInt(savedGoal, 10));
 
-        const fetchData = async () => {
+            // التحقق من التوفر
+            const isAvailable = await Pedometer.isAvailableAsync();
+            if (!isAvailable) {
+                setStatus('unavailable');
+                return;
+            }
+
+            // طلب الصلاحيات
+            const { status: permissionStatus } = await Pedometer.requestPermissionsAsync();
+            if (permissionStatus !== 'granted') {
+                setStatus('denied');
+                return;
+            }
+
+            // جلب الخطوات
+            const end = new Date();
+            const start = new Date();
+            start.setHours(0, 0, 0, 0);
+
             try {
-                // 1. جلب الهدف
-                const savedGoal = await AsyncStorage.getItem('stepsGoal');
-                if (isActive && savedGoal) {
-                    setGoal(parseInt(savedGoal, 10));
-                }
-
-                // 2. التحقق من Google Fit مباشرة (ده التعديل المهم)
-                if (Platform.OS === 'android' && GoogleFit) {
-                    // نتأكد من الصلاحية مباشرة من Google Fit
-                    const isAuth = await GoogleFit.checkIsAuthorized();
-                    
-                    // نحدث حالة الاتصال بناءً على الحقيقة مش التخزين
-                    if (isActive) setIsConnected(isAuth);
-
-                    if (isAuth) {
-                        const now = new Date();
-                        const startOfDay = new Date();
-                        startOfDay.setHours(0, 0, 0, 0);
-
-                        const opt = {
-                            startDate: startOfDay.toISOString(),
-                            endDate: now.toISOString(),
-                            bucketUnit: 'DAY',
-                            bucketInterval: 1
-                        };
-
-                        const res = await GoogleFit.getDailyStepCountSamples(opt);
-                        if (isActive && res && res.length > 0) {
-                            let maxSteps = 0;
-                            // نفس اللوجيك بالظبط اللي في صفحة الخطوات عشان الأرقام تطابق
-                            res.forEach(source => {
-                                if (source.steps && source.steps.length > 0) {
-                                    source.steps.forEach(step => {
-                                        if(step.value > maxSteps) maxSteps = step.value;
-                                    });
-                                }
-                            });
-                            setSteps(maxSteps);
-                        }
-                    }
-                }
-            } catch (e) {
-                console.log("Steps Widget Error:", e);
+                const result = await Pedometer.getStepCountAsync(start, end);
+                if (result) setCurrentStepCount(result.steps);
+                setStatus('available');
+            } catch (error) {
+                console.error("Pedometer error:", error);
+                // حتى في حالة الخطأ بنعتبره متاح عشان نعرض 0 بدل ما نخفي الدائرة
+                setStatus('available'); 
             }
         };
-        
-        InteractionManager.runAfterInteractions(() => {
-            fetchData();
-        });
-        
-        return () => { isActive = false; };
+
+        subscribe();
     }, []));
 
-    const progress = goal > 0 ? steps / goal : 0;
+    const renderContent = () => {
+        if (status === 'checking') return <ActivityIndicator style={{ marginTop: 20 }} color={theme.primary} />;
+        if (status === 'unavailable' || status === 'denied') {
+            return (
+                <Text style={[styles.smallCardValue(theme), { fontSize: 16, marginTop: 15, textAlign: 'center' }]}>
+                    {t('unsupported')}
+                </Text>
+            );
+        }
+
+        const progress = stepsGoal > 0 ? currentStepCount / stepsGoal : 0;
+
+        return (
+            <View style={styles.stepsCardContent}>
+                <View style={styles.stepsCardCircleContainer}>
+                    <Progress.Circle 
+                        size={80} 
+                        progress={progress} 
+                        showsText={false} 
+                        color={theme.primary} 
+                        unfilledColor={theme.progressUnfilled} 
+                        borderWidth={0} 
+                        thickness={8} 
+                    />
+                    <View style={styles.stepsCardTextContainer}>
+                        <Text style={styles.stepsCardCountText(theme)} numberOfLines={1}>
+                            {currentStepCount.toLocaleString('en-US')}
+                        </Text>
+                    </View>
+                </View>
+                <Text style={styles.stepsCardGoalText(theme)}>
+                    {t('goal')}{stepsGoal.toLocaleString('en-US')}
+                </Text>
+            </View>
+        );
+    };
 
     return (
         <TouchableOpacity style={styles.smallCard(theme)} onPress={() => navigation.navigate('Steps')}>
@@ -530,39 +520,11 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                 </View>
                 <Text style={[styles.smallCardTitle(theme), { marginStart: 8 }]}>{t('steps')}</Text>
             </View>
-            
-            <View style={styles.stepsCardContent}>
-                {!isConnected ? (
-                    <Text style={[styles.smallCardValue(theme), { fontSize: 14, color: theme.textSecondary }]}>
-                        {t('not_logged')}
-                    </Text>
-                ) : (
-                    <>
-                        <View style={styles.stepsCardCircleContainer}>
-                            <Progress.Circle 
-                                size={80} 
-                                progress={progress} 
-                                showsText={false} 
-                                color={theme.primary} 
-                                unfilledColor={theme.progressUnfilled} 
-                                borderWidth={0} 
-                                thickness={8} 
-                            />
-                            <View style={styles.stepsCardTextContainer}>
-                                <Text style={styles.stepsCardCountText(theme)} numberOfLines={1}>
-                                    {steps.toLocaleString('en-US')}
-                                </Text>
-                            </View>
-                        </View>
-                        <Text style={styles.stepsCardGoalText(theme)}>
-                            {t('goal')}{goal.toLocaleString('en-US')}
-                        </Text>
-                    </>
-                )}
-            </View>
+            {renderContent()}
         </TouchableOpacity>
     ); 
 };
+// --- END: نهاية تعديل كارد الخطوات ---
 
 const DashboardGrid = ({ weight, water, waterGoal, totalExerciseCalories, onWeightPress, onWaterPress, onWorkoutPress, navigation, theme, t, language }) => (
     <View style={[styles.dashboardGridContainer, { flexDirection: getFlexDirection(language) }]}>
