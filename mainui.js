@@ -3,7 +3,11 @@ import 'react-native-get-random-values';
 import 'react-native-gesture-handler';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { StyleSheet, View, Text, ScrollView, SafeAreaView, TouchableOpacity, Dimensions, Image, Platform, TextInput, FlatList, ActivityIndicator, Alert, Modal, StatusBar, I18nManager, BackHandler } from 'react-native';
+import { 
+    StyleSheet, View, Text, ScrollView, SafeAreaView, TouchableOpacity, 
+    Dimensions, Image, Platform, TextInput, FlatList, ActivityIndicator, 
+    Alert, Modal, StatusBar, I18nManager, BackHandler, InteractionManager // <--- تم إضافة InteractionManager
+} from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useFocusEffect, useNavigationState, getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -76,15 +80,19 @@ TaskManager.defineTask(STEPS_NOTIFICATION_TASK, async () => {
                     bucketUnit: 'DAY',
                     bucketInterval: 1
                 };
-                const res = await GoogleFit.getDailyStepCountSamples(opt);
-                if (res && res.length > 0) {
-                    res.forEach(source => {
-                         if (source.steps && source.steps.length > 0) {
-                            source.steps.forEach(step => {
-                                if(step.value > currentSteps) currentSteps = step.value;
-                            });
-                        }
-                    });
+                // التأكد من الجاهزية قبل الاستدعاء في الخلفية
+                const isAuthorized = await GoogleFit.checkIsAuthorized();
+                if (isAuthorized) {
+                    const res = await GoogleFit.getDailyStepCountSamples(opt);
+                    if (res && res.length > 0) {
+                        res.forEach(source => {
+                             if (source.steps && source.steps.length > 0) {
+                                source.steps.forEach(step => {
+                                    if(step.value > currentSteps) currentSteps = step.value;
+                                });
+                            }
+                        });
+                    }
                 }
             } catch (gfError) {
                 console.log("GoogleFit bg error", gfError);
@@ -448,6 +456,7 @@ const SmallWorkoutCard = ({ totalCaloriesBurned = 0, onPress, theme, t, language
     ); 
 };
 
+// --- FIX: Updated SmallStepsCard with InteractionManager ---
 const SmallStepsCard = ({ navigation, theme, t, language }) => { 
     const [steps, setSteps] = useState(0);
     const [goal, setGoal] = useState(10000);
@@ -460,60 +469,64 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
             const savedGoal = await AsyncStorage.getItem('stepsGoal');
             if (isActive && savedGoal) setGoal(parseInt(savedGoal, 10));
 
-            let isAuth = false;
-            
-            if (Platform.OS === 'android' && GoogleFit) {
-                try {
-                    await GoogleFit.checkIsAuthorized();
-                    if (GoogleFit.isAuthorized) {
-                         isAuth = true;
-                         await AsyncStorage.setItem('isGoogleFitConnected', 'true');
-                    }
-                } catch (e) {
-                    console.log("Check Auth Error safe:", e);
-                }
+            // تحقق من الـ Storage أولاً لتجنب الاستدعاءات العقيمة التي تجمد التطبيق
+            const storedStatus = await AsyncStorage.getItem('isGoogleFitConnected');
+            const shouldTryConnect = storedStatus === 'true';
+
+            if (!shouldTryConnect) {
+                if (isActive) setIsConnected(false);
+                return; 
             }
 
-            const storedStatus = await AsyncStorage.getItem('isGoogleFitConnected');
-            const finalStatus = isAuth || (storedStatus === 'true');
-            if (isActive) setIsConnected(finalStatus);
-
-            if (finalStatus && Platform.OS === 'android' && GoogleFit) {
-                const now = new Date();
-                const startOfDay = new Date();
-                startOfDay.setHours(0, 0, 0, 0);
-
-                const opt = {
-                    startDate: startOfDay.toISOString(),
-                    endDate: now.toISOString(),
-                    bucketUnit: 'DAY',
-                    bucketInterval: 1
-                };
-
+            if (Platform.OS === 'android' && GoogleFit) {
                 try {
-                    const res = await GoogleFit.getDailyStepCountSamples(opt);
-                    if (isActive && res && res.length > 0) {
-                        let maxSteps = 0;
-                        res.forEach(source => {
-                            if (source.steps && source.steps.length > 0) {
-                                source.steps.forEach(step => {
-                                    if(step.value > maxSteps) maxSteps = step.value;
-                                });
+                    // Check auth only if we think we are connected
+                    const isAuth = await GoogleFit.checkIsAuthorized();
+                    
+                    if (isActive) setIsConnected(isAuth);
+
+                    if (isAuth) {
+                        const now = new Date();
+                        const startOfDay = new Date();
+                        startOfDay.setHours(0, 0, 0, 0);
+
+                        const opt = {
+                            startDate: startOfDay.toISOString(),
+                            endDate: now.toISOString(),
+                            bucketUnit: 'DAY',
+                            bucketInterval: 1
+                        };
+
+                        const res = await GoogleFit.getDailyStepCountSamples(opt);
+                        if (isActive && res && res.length > 0) {
+                            let maxSteps = 0;
+                            res.forEach(source => {
+                                if (source.steps && source.steps.length > 0) {
+                                    source.steps.forEach(step => {
+                                        if(step.value > maxSteps) maxSteps = step.value;
+                                    });
+                                }
+                            });
+                            // Fallback logic
+                            if (maxSteps === 0 && res.some(s => s.steps.length > 0)) {
+                                 res.forEach(source => {
+                                     if(source.steps.length > 0) maxSteps += source.steps[0].value;
+                                 });
                             }
-                        });
-                        if (maxSteps === 0 && res.some(s => s.steps.length > 0)) {
-                             res.forEach(source => {
-                                 if(source.steps.length > 0) maxSteps += source.steps[0].value;
-                             });
+                            setSteps(maxSteps);
                         }
-                        setSteps(maxSteps);
                     }
                 } catch (e) {
                     console.log("Widget Error:", e);
+                    if(isActive) setIsConnected(false);
                 }
             }
         };
-        fetchSteps();
+        
+        // --- FIX: Wrap logic in InteractionManager to allow UI to paint first ---
+        InteractionManager.runAfterInteractions(() => {
+            fetchSteps();
+        });
         
         return () => { isActive = false; };
     }, []));
