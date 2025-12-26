@@ -4,7 +4,8 @@ import {
     ActivityIndicator, Modal, TextInput, StatusBar,
     Platform, PermissionsAndroid, AppState, InteractionManager,
     I18nManager,
-    DeviceEventEmitter 
+    DeviceEventEmitter,
+    Alert 
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons'; 
@@ -104,6 +105,7 @@ const StepsScreen = () => {
     const [language, setLanguage] = useState('en');
     const [selectedBarIndex, setSelectedBarIndex] = useState(null);
 
+    // رجعتها زي ما كانت بالظبط بناء على طلبك
     const isRTL = language === 'en'; 
 
     const t = (key) => translations[language]?.[key] || translations['en'][key] || key;
@@ -119,23 +121,20 @@ const StepsScreen = () => {
         });
     }, [navigation, theme, language, isRTL]);
 
-    const fetchGoogleFitData = useCallback(async (shouldFetchHistory = true, isLiveUpdate = false) => {
-        if (isFetchingRef.current && !isLiveUpdate) return;
+    const fetchGoogleFitData = useCallback(async (shouldFetchHistory = true) => {
+        if (isFetchingRef.current) return;
         isFetchingRef.current = true;
 
         try {
-            const storedConnected = await AsyncStorage.getItem('isGoogleFitConnected');
-            if (storedConnected !== 'true' || Platform.OS !== 'android' || !GoogleFit) {
-                setIsGoogleFitConnected(false); setLoading(false); isFetchingRef.current = false; return;
+            const isAuth = await GoogleFit.checkIsAuthorized();
+            if (!isAuth) {
+                setIsGoogleFitConnected(false);
+                setLoading(false);
+                isFetchingRef.current = false;
+                return;
             }
 
-            if (!isLiveUpdate) {
-                const isAuth = await GoogleFit.checkIsAuthorized();
-                if (!isAuth) {
-                    try { await GoogleFit.authorize({ scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] }); } catch(e){}
-                }
-                setIsGoogleFitConnected(true);
-            }
+            setIsGoogleFitConnected(true);
             
             const now = new Date();
             const startOfDay = new Date();
@@ -152,11 +151,6 @@ const StepsScreen = () => {
                     }
                 });
                 setDisplaySteps(maxSteps);
-            }
-
-            if (isLiveUpdate) {
-                isFetchingRef.current = false;
-                return;
             }
 
             if (shouldFetchHistory) {
@@ -189,11 +183,59 @@ const StepsScreen = () => {
         }
     }, []);
 
+    const checkPermissionsAndConnect = async () => {
+        setLoading(true);
+        
+        try {
+            if (Platform.OS === 'android' && Platform.Version >= 29) {
+                const granted = await PermissionsAndroid.request(
+                    PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION
+                );
+                
+                if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+                    Alert.alert(t('permissionDeniedTitle'), t('permissionDeniedMsg'));
+                    setLoading(false);
+                    return;
+                }
+            }
+
+            const options = {
+                scopes: [
+                    Scopes.FITNESS_ACTIVITY_READ,
+                    Scopes.FITNESS_ACTIVITY_WRITE,
+                    Scopes.FITNESS_BODY_READ,
+                ],
+            };
+
+            const isAlreadyAuthorized = await GoogleFit.checkIsAuthorized();
+            
+            if (!isAlreadyAuthorized) {
+                const authResult = await GoogleFit.authorize(options);
+                if (authResult.success) {
+                    setIsGoogleFitConnected(true);
+                    await AsyncStorage.setItem('isGoogleFitConnected', 'true');
+                    fetchGoogleFitData(true);
+                } else {
+                    console.log("AUTH_DENIED", authResult.message);
+                    setIsGoogleFitConnected(false);
+                    setLoading(false);
+                }
+            } else {
+                setIsGoogleFitConnected(true);
+                fetchGoogleFitData(true);
+            }
+
+        } catch (error) {
+            console.warn("Auth Error:", error);
+            setIsGoogleFitConnected(false);
+            setLoading(false);
+        }
+    };
+
     useFocusEffect(
         useCallback(() => {
             let isMounted = true;
             let intervalId = null;
-            let appStateSubscription = null;
 
             const init = async () => {
                 const savedTheme = await AsyncStorage.getItem('isDarkMode');
@@ -207,14 +249,12 @@ const StepsScreen = () => {
 
                 InteractionManager.runAfterInteractions(() => {
                     if (isMounted) {
-                        fetchGoogleFitData(true, false);
-                        appStateSubscription = AppState.addEventListener('change', nextAppState => {
-                            if (nextAppState === 'active' && isMounted) {
-                                fetchGoogleFitData(false, true);
-                            }
-                        });
+                        checkPermissionsAndConnect();
+
                         intervalId = setInterval(() => {
-                            if (isMounted) fetchGoogleFitData(false, true);
+                            if (isMounted && isGoogleFitConnected) {
+                                fetchGoogleFitData(false);
+                            }
                         }, 10000); 
                     }
                 });
@@ -224,32 +264,12 @@ const StepsScreen = () => {
             return () => { 
                 isMounted = false; 
                 if (intervalId) clearInterval(intervalId);
-                if (appStateSubscription) appStateSubscription.remove();
             };
-        }, [fetchGoogleFitData]) 
+        }, []) 
     );
     
-    const connectGoogleFit = async () => {
-        if (!GoogleFit) {
-             Alert.alert(t('errorTitle'), t('notAvailableMsg'));
-             return;
-        }
-        try {
-            let permissionGranted = true;
-            if (Platform.OS === 'android' && Platform.Version >= 29) {
-                const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION);
-                if (granted !== PermissionsAndroid.RESULTS.GRANTED) permissionGranted = false;
-            }
-            if (permissionGranted) {
-                const options = { scopes: [Scopes.FITNESS_ACTIVITY_READ, Scopes.FITNESS_ACTIVITY_WRITE, Scopes.FITNESS_BODY_READ] };
-                const res = await GoogleFit.authorize(options);
-                if (res.success) {
-                    setIsGoogleFitConnected(true);
-                    await AsyncStorage.setItem('isGoogleFitConnected', 'true');
-                    fetchGoogleFitData(true, false);
-                }
-            }
-        } catch (error) { console.warn("Auth Error:", error); }
+    const connectGoogleFit = () => {
+        checkPermissionsAndConnect();
     };
 
     useEffect(() => {
