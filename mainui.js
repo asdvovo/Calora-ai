@@ -457,38 +457,33 @@ const SmallWorkoutCard = ({ totalCaloriesBurned = 0, onPress, theme, t, language
     ); 
 };
 
-// --- FIX: Updated SmallStepsCard with InteractionManager + Logic to Show "Not Connected" initially ---
 const SmallStepsCard = ({ navigation, theme, t, language }) => { 
     const [steps, setSteps] = useState(0);
     const [goal, setGoal] = useState(10000);
-    const [isConnected, setIsConnected] = useState(false); // Default false
+    const [isConnected, setIsConnected] = useState(false);
 
     useFocusEffect(useCallback(() => {
         let isActive = true;
 
-        const fetchSteps = async () => {
-            const savedGoal = await AsyncStorage.getItem('stepsGoal');
-            if (isActive && savedGoal) setGoal(parseInt(savedGoal, 10));
+        const fetchData = async () => {
+            try {
+                // 1. جلب الهدف وتحديثه عند التركيز على الشاشة
+                const savedGoal = await AsyncStorage.getItem('stepsGoal');
+                if (isActive && savedGoal) {
+                    setGoal(parseInt(savedGoal, 10));
+                }
 
-            // 1. Check if user intends to be connected (via AsyncStorage)
-            const storedStatus = await AsyncStorage.getItem('isGoogleFitConnected');
-            
-            // If storage says NOT connected (or null), stop here.
-            // This prevents the circle from showing and prevents freezing.
-            if (storedStatus !== 'true') {
-                if (isActive) setIsConnected(false);
-                return; 
-            }
+                // 2. التحقق من حالة الاتصال
+                const storedStatus = await AsyncStorage.getItem('isGoogleFitConnected');
+                if (storedStatus !== 'true') {
+                    if (isActive) setIsConnected(false);
+                    return; 
+                }
+                if (isActive) setIsConnected(true);
 
-            // 2. If storage says 'true', update UI to show circle immediately (to avoid flicker)
-            if (isActive) setIsConnected(true);
-
-            // 3. Try fetching data from Google Fit
-            if (Platform.OS === 'android' && GoogleFit) {
-                try {
-                    // Check authorization without prompting (quiet check)
+                // 3. جلب الخطوات من Google Fit
+                if (Platform.OS === 'android' && GoogleFit) {
                     const isAuth = await GoogleFit.checkIsAuthorized();
-                    
                     if (isAuth) {
                         const now = new Date();
                         const startOfDay = new Date();
@@ -511,7 +506,7 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                                     });
                                 }
                             });
-                             // Fallback logic
+                            // محاولة جمع الخطوات كحل بديل إذا لم تنجح الطريقة الأولى
                             if (maxSteps === 0 && res.some(s => s.steps.length > 0)) {
                                  res.forEach(source => {
                                      if(source.steps.length > 0) maxSteps += source.steps[0].value;
@@ -520,15 +515,14 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                             setSteps(maxSteps);
                         }
                     } 
-                } catch (e) {
-                    console.log("Widget GF Error:", e);
                 }
+            } catch (e) {
+                console.log("Steps Widget Error:", e);
             }
         };
         
-        // Wrap logic in InteractionManager to allow UI to paint first (prevents freeze)
         InteractionManager.runAfterInteractions(() => {
-            fetchSteps();
+            fetchData();
         });
         
         return () => { isActive = false; };
@@ -547,12 +541,10 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
             
             <View style={styles.stepsCardContent}>
                 {!isConnected ? (
-                    // Show this if NOT connected
                     <Text style={[styles.smallCardValue(theme), { fontSize: 14, color: theme.textSecondary }]}>
                         {t('not_logged')}
                     </Text>
                 ) : (
-                    // Show this ONLY if connected
                     <>
                         <View style={styles.stepsCardCircleContainer}>
                             <Progress.Circle 
@@ -565,10 +557,14 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                                 thickness={8} 
                             />
                             <View style={styles.stepsCardTextContainer}>
-                                <Text style={styles.stepsCardCountText(theme)}>{steps.toLocaleString()}</Text>
+                                <Text style={styles.stepsCardCountText(theme)} numberOfLines={1}>
+                                    {steps.toLocaleString('en-US')}
+                                </Text>
                             </View>
                         </View>
-                        <Text style={styles.stepsCardGoalText(theme)}>{t('goal')}{goal.toLocaleString()}</Text>
+                        <Text style={styles.stepsCardGoalText(theme)}>
+                            {t('goal')}{goal.toLocaleString('en-US')}
+                        </Text>
                     </>
                 )}
             </View>
@@ -975,10 +971,10 @@ const styles = StyleSheet.create({
     smallCardContent: { }, 
     waterVisualizerContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', flexWrap: 'wrap', rowGap: 5, }, 
     waterDropIcon: { marginHorizontal: 1, }, 
-    stepsCardContent: { flex: 1, justifyContent: 'center', alignItems: 'center' }, 
-    stepsCardCircleContainer: { justifyContent: 'center', alignItems: 'center', marginVertical: 5, }, 
-    stepsCardTextContainer: { position: 'absolute', }, 
-    stepsCardCountText: (theme) => ({ fontSize: 22, fontWeight: 'bold', color: theme.textPrimary, }), 
+    stepsCardContent: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 5 }, 
+    stepsCardCircleContainer: { width: 80, height: 80, justifyContent: 'center', alignItems: 'center', marginVertical: 5, position: 'relative' }, 
+    stepsCardTextContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', zIndex: 10 }, 
+    stepsCardCountText: (theme) => ({ fontSize: 15, fontWeight: 'bold', color: theme.textPrimary, textAlign: 'center', width: '90%' }), 
     stepsCardGoalText: (theme) => ({ fontSize: 13, color: theme.textSecondary, marginTop: 2, }), 
     foodLogItemContainer: { alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' }, 
     foodLogItemImage: { width: 50, height: 50, borderRadius: 10, marginEnd: 15, }, 
