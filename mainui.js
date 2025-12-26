@@ -6,7 +6,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
     StyleSheet, View, Text, ScrollView, SafeAreaView, TouchableOpacity, 
     Dimensions, Image, Platform, TextInput, FlatList, ActivityIndicator, 
-    Alert, Modal, StatusBar, I18nManager, BackHandler, InteractionManager // <--- تم إضافة InteractionManager
+    Alert, Modal, StatusBar, I18nManager, BackHandler, InteractionManager
 } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useFocusEffect, useNavigationState, getFocusedRouteNameFromRoute } from '@react-navigation/native';
@@ -80,7 +80,6 @@ TaskManager.defineTask(STEPS_NOTIFICATION_TASK, async () => {
                     bucketUnit: 'DAY',
                     bucketInterval: 1
                 };
-                // التأكد من الجاهزية قبل الاستدعاء في الخلفية
                 const isAuthorized = await GoogleFit.checkIsAuthorized();
                 if (isAuthorized) {
                     const res = await GoogleFit.getDailyStepCountSamples(opt);
@@ -97,7 +96,9 @@ TaskManager.defineTask(STEPS_NOTIFICATION_TASK, async () => {
             } catch (gfError) {
                 console.log("GoogleFit bg error", gfError);
             }
-        } else {
+        } 
+        
+        if (currentSteps === 0) {
             const isAvailable = await Pedometer.isAvailableAsync();
             if (isAvailable) {
                 const { steps } = await Pedometer.getStepCountAsync(start, new Date());
@@ -456,11 +457,11 @@ const SmallWorkoutCard = ({ totalCaloriesBurned = 0, onPress, theme, t, language
     ); 
 };
 
-// --- FIX: Updated SmallStepsCard with InteractionManager ---
+// --- FIX: Updated SmallStepsCard with InteractionManager + Logic to Show "Not Connected" initially ---
 const SmallStepsCard = ({ navigation, theme, t, language }) => { 
     const [steps, setSteps] = useState(0);
     const [goal, setGoal] = useState(10000);
-    const [isConnected, setIsConnected] = useState(false);
+    const [isConnected, setIsConnected] = useState(false); // Default false
 
     useFocusEffect(useCallback(() => {
         let isActive = true;
@@ -469,22 +470,25 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
             const savedGoal = await AsyncStorage.getItem('stepsGoal');
             if (isActive && savedGoal) setGoal(parseInt(savedGoal, 10));
 
-            // تحقق من الـ Storage أولاً لتجنب الاستدعاءات العقيمة التي تجمد التطبيق
+            // 1. Check if user intends to be connected (via AsyncStorage)
             const storedStatus = await AsyncStorage.getItem('isGoogleFitConnected');
-            const shouldTryConnect = storedStatus === 'true';
-
-            if (!shouldTryConnect) {
+            
+            // If storage says NOT connected (or null), stop here.
+            // This prevents the circle from showing and prevents freezing.
+            if (storedStatus !== 'true') {
                 if (isActive) setIsConnected(false);
                 return; 
             }
 
+            // 2. If storage says 'true', update UI to show circle immediately (to avoid flicker)
+            if (isActive) setIsConnected(true);
+
+            // 3. Try fetching data from Google Fit
             if (Platform.OS === 'android' && GoogleFit) {
                 try {
-                    // Check auth only if we think we are connected
+                    // Check authorization without prompting (quiet check)
                     const isAuth = await GoogleFit.checkIsAuthorized();
                     
-                    if (isActive) setIsConnected(isAuth);
-
                     if (isAuth) {
                         const now = new Date();
                         const startOfDay = new Date();
@@ -507,7 +511,7 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                                     });
                                 }
                             });
-                            // Fallback logic
+                             // Fallback logic
                             if (maxSteps === 0 && res.some(s => s.steps.length > 0)) {
                                  res.forEach(source => {
                                      if(source.steps.length > 0) maxSteps += source.steps[0].value;
@@ -515,15 +519,14 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                             }
                             setSteps(maxSteps);
                         }
-                    }
+                    } 
                 } catch (e) {
-                    console.log("Widget Error:", e);
-                    if(isActive) setIsConnected(false);
+                    console.log("Widget GF Error:", e);
                 }
             }
         };
         
-        // --- FIX: Wrap logic in InteractionManager to allow UI to paint first ---
+        // Wrap logic in InteractionManager to allow UI to paint first (prevents freeze)
         InteractionManager.runAfterInteractions(() => {
             fetchSteps();
         });
@@ -544,10 +547,12 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
             
             <View style={styles.stepsCardContent}>
                 {!isConnected ? (
+                    // Show this if NOT connected
                     <Text style={[styles.smallCardValue(theme), { fontSize: 14, color: theme.textSecondary }]}>
                         {t('not_logged')}
                     </Text>
                 ) : (
+                    // Show this ONLY if connected
                     <>
                         <View style={styles.stepsCardCircleContainer}>
                             <Progress.Circle 
