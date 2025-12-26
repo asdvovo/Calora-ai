@@ -541,36 +541,55 @@ const SettingsScreen = ({ navigation, onThemeChange, appLanguage }) => {
   };
 
 const handleSaveLanguage = async () => {
-    if (activeLanguage === selectedLanguage) { setCurrentView('main'); return; }
+    // لو مفيش تغيير في اللغة، ارجع للشاشة الرئيسية وخلاص
+    if (activeLanguage === selectedLanguage) { 
+        setCurrentView('main'); 
+        return; 
+    }
+
     try {
-      await AsyncStorage.setItem('appLanguage', selectedLanguage);
-      const isAr = selectedLanguage === 'ar';
-      
+      // 1. الخطوة الأهم: افصل Google Fit الأول لو كان متصل
       if (isGoogleFitConnected && GoogleFit) {
           try {
+              // بنحاول نفصل ونستنى الرد
               await GoogleFit.disconnect();
+              console.log("Google Fit disconnected successfully before language change.");
           } catch (err) {
-              console.log("Disconnect error before reload:", err);
+              console.log("Disconnect error (ignored):", err);
           }
+          
+          // نحدث الحالة والذاكرة عشان لما التطبيق يفتح تاني ميعتبرش نفسه متصل غلط
+          setIsGoogleFitConnected(false);
+          await AsyncStorage.setItem('isGoogleFitConnected', 'false');
       }
 
-      setActiveLanguage(selectedLanguage);
+      // 2. احفظ اللغة الجديدة في الذاكرة
+      await AsyncStorage.setItem('appLanguage', selectedLanguage);
+      const isAr = selectedLanguage === 'ar';
 
+      // 3. غير اتجاه التطبيق (RTL/LTR)
+      // الترتيب هنا مهم: بنغير الإعدادات بعد ما ضمنا ان جوجل فيت فصل
       I18nManager.allowRTL(true);
       I18nManager.forceRTL(isAr);
       
+      // تحديث الـ State (شكلياً لحد ما يعمل ريستارت)
+      setActiveLanguage(selectedLanguage);
+
+      // 4. اظهر رسالة التنبيه واعمل ريستارت
       Alert.alert(
         t('languageSaved', selectedLanguage), 
         t('languageSettingsUpdated', selectedLanguage), 
         [ 
             { 
                 text: 'OK', 
-                onPress: () => { 
+                onPress: async () => { 
+                    // تأخير بسيط جداً للتأكد من حفظ الـ AsyncStorage
                     setTimeout(async () => {
                         try {
                             await Updates.reloadAsync();
                         } catch(e) {
                            console.log("Reload error", e);
+                           // لو الريلود فشل، نطلب من المستخدم يقفل ويفتح
                            Alert.alert("Note", "Please close and reopen the app manually.");
                         }
                     }, 500);
@@ -579,9 +598,11 @@ const handleSaveLanguage = async () => {
         ], 
         { cancelable: false }
       );
-    } catch (e) { console.error("Failed to save language settings.", e); Alert.alert("Error", "Could not save language settings."); }
+    } catch (e) { 
+        console.error("Failed to save language settings.", e); 
+        Alert.alert("Error", "Could not save language settings."); 
+    }
   };
-
   const renderContent = () => {
     if (currentView === 'notifications') {
       return (
