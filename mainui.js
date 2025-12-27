@@ -21,7 +21,6 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
-// التعديل هنا: استدعاء Scopes عشان الصلاحيات
 import GoogleFit, { Scopes } from 'react-native-google-fit'; 
 
 import ProfileScreen from './profile';
@@ -433,7 +432,7 @@ const SmallWorkoutCard = ({ totalCaloriesBurned = 0, onPress, theme, t, language
     ); 
 };
 
-// --- START: كارت الخطوات (تم التعديل للإصلاح) ---
+// --- START: كارت الخطوات (تم التعديل ليكون صامتاً) ---
 const SmallStepsCard = ({ navigation, theme, t, language }) => { 
     const [status, setStatus] = useState('checking'); // 'checking' | 'connected' | 'disconnected'
     const [currentStepCount, setCurrentStepCount] = useState(0);
@@ -449,26 +448,27 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                 const savedGoal = await AsyncStorage.getItem('stepsGoal');
                 if (isActive && savedGoal) setStepsGoal(parseInt(savedGoal, 10));
 
+                // 2. الفحص الأول: هل المستخدم فعل الاتصال من الإعدادات؟ (أهم خطوة)
+                const storedConnectionStatus = await AsyncStorage.getItem('isGoogleFitConnected');
+                
+                // لو مش متفعل من الإعدادات، وقف هنا ومتعملش أي حاجة تانية
+                if (storedConnectionStatus !== 'true') {
+                    if (isActive) setStatus('disconnected');
+                    return; 
+                }
+
+                // 3. أمان: تأكد إن المكتبة موجودة
                 if (!GoogleFit) {
                     if (isActive) setStatus('disconnected');
                     return; 
                 }
 
-                // 2. محاولة الاتصال وتنشيط العميل (الحل السحري)
-                const options = {
-                    scopes: [
-                        Scopes.FITNESS_ACTIVITY_READ,
-                        Scopes.FITNESS_ACTIVITY_WRITE,
-                        Scopes.FITNESS_BODY_READ,
-                    ],
-                };
+                // 4. فحص الصلاحية فقط (بدون طلب)
+                const isAuthorized = await GoogleFit.checkIsAuthorized();
 
-                // بنحاول نعمل authorize حتى لو المستخدم واخد صلاحية قبل كدة عشان ننعش الاتصال
-                const authResult = await GoogleFit.authorize(options);
-
-                if (authResult.success) {
+                if (isAuthorized) {
+                    // لو الصلاحية موجودة ومسجل إنه متصل، ابدأ جلب البيانات
                     if (isActive) setStatus('connected');
-                    await AsyncStorage.setItem('isGoogleFitConnected', 'true');
 
                     const now = new Date();
                     const startOfDay = new Date();
@@ -484,13 +484,14 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                     const res = await GoogleFit.getDailyStepCountSamples(opt);
                     
                     if (isActive && res && res.length > 0) {
-                        // محاولة جلب الخطوات بدقة
+                        // محاولة جلب الخطوات المقدرة (Estimated) لدقة أعلى
                         const estimatedSource = res.find(source => source.source === "com.google.android.gms:estimated_steps");
                         let finalSteps = 0;
 
                         if (estimatedSource && estimatedSource.steps.length > 0) {
                             finalSteps = estimatedSource.steps[0].value;
                         } else {
+                            // بديل: البحث عن أكبر قيمة
                             res.forEach(source => {
                                 if (source.steps) {
                                     source.steps.forEach(step => { 
@@ -502,17 +503,18 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
                         setCurrentStepCount(finalSteps);
                     }
                 } else {
+                    // لو مش واخد صلاحية، خلاص اعتبره مفصول ومتطلبش حاجة
                     if (isActive) setStatus('disconnected');
                 }
 
             } catch (error) {
-                console.log("Steps sync error:", error);
+                console.log("Steps sync safely handled:", error);
                 if (isActive) setStatus('disconnected');
             }
         };
 
         syncData();
-        // تحديث كل 10 ثواني بدلاً من 5 لتخفيف الحمل
+        // تحديث صامت كل 10 ثواني (فقط لو كان متصل بالفعل)
         intervalId = setInterval(syncData, 10000);
 
         return () => { 
@@ -530,6 +532,7 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
             return <ActivityIndicator size="small" color={theme.primary} style={{ marginTop: 20 }} />;
         }
 
+        // إذا كان غير متصل، يظهر النص والأيقونة
         if (status === 'disconnected') {
             return (
                 <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -541,6 +544,7 @@ const SmallStepsCard = ({ navigation, theme, t, language }) => {
             );
         }
 
+        // إذا تم الاتصال بنجاح: تظهر الدائرة والهدف
         return (
             <View style={styles.stepsCardContent}>
                 <View style={styles.stepsCardCircleContainer}>
